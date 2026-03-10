@@ -1,0 +1,234 @@
+/* --- Design System --- */
+* {
+  font-family: 'Montserrat', sans-serif;
+  box-sizing: border-box;
+}
+
+:root {
+  --overlay-bg: rgba(255, 255, 255, 0.15);
+  --glass-blur: blur(12px);
+  --accent-gradient: linear-gradient(135deg, #42625e, #608f89);
+  --stop-gradient: linear-gradient(135deg, #94353e, #d54c5a);
+  --shadow-lg: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  /* No scrolling for full-screen immersion */
+  background-color: #000;
+}
+
+/* --- Full Screen Camera Background --- */
+#videoContainer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1;
+  /* Lowest layer */
+  background-color: #000;
+}
+
+#videoFeed {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Cover the whole screen */
+}
+
+#attentionCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.6;
+  mix-blend-mode: screen;
+  display: none;
+  /* Controlled by JS */
+}
+
+/* --- Slim Top Loading Bar --- */
+#loadingOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  display: none;
+  z-index: 9999;
+  background-color: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+#loadingOverlay::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 35%;
+  background: var(--accent-gradient);
+  animation: loadingSlide 1.8s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+  border-radius: 4px;
+}
+
+@keyframes loadingSlide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+/* --- Overlays (Floating Controls) --- */
+.io-areas {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Initial center position */
+  width: 90%;
+  max-width: 520px;
+  z-index: 100;
+  background: var(--overlay-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: 24px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  transition: background 0.3s ease, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: grab;
+  user-select: none;
+  /* Prevent text selection while dragging */
+}
+
+/* Drag handle hint at the top of the panel */
+.io-areas::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+}
+
+.io-areas:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.85em;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+textarea {
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  font-size: 15px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+  transition: all 0.2s ease;
+  resize: none;
+}
+
+textarea:focus {
+  border-color: #608f89;
+  background: rgba(0, 0, 0, 0.3);
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(96, 143, 137, 0.2);
+}
+
+#responseText {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #e0e0e0;
+}
+
+/* --- Buttons --- */
+#startButton {
+  width: 100%;
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  cursor: pointer;
+  border-radius: 14px;
+  color: white;
+  border: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  text-transform: uppercase;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+#startButton.start {
+  background: var(--accent-gradient);
+}
+
+#startButton.stop {
+  background: var(--stop-gradient);
+}
+
+#attentionToggle {
+  flex: 1;
+  padding: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 14px;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(5px);
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+
+#attentionToggle.active {
+  background: var(--accent-gradient);
+  border-color: #608f89;
+}
+
+#startButton:hover,
+#attentionToggle:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+#startButton:active {
+  transform: translateY(0);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Hide scrollbar but allow functional overflow */
+::-webkit-scrollbar {
+  display: none;
+}

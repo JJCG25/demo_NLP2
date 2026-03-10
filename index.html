@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script>window.huggingface = { variables: { "SPACE_CREATOR_USER_ID": "61b253b7ac5ecaae3d1efe0c" } };</script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camera Interaction App</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+
+  <div id="videoContainer">
+    <video id="videoFeed" autoplay playsinline></video>
+    <div id="loadingOverlay">Loading...</div>
+  </div>
+  <canvas id="canvas" class="hidden"></canvas>
+
+  <div class="io-areas">
+    <div>
+      <label for="instructionText">Instruction:</label><br />
+      <textarea id="instructionText" style="height: 2em; width: 100%" name="Instruction"></textarea>
+    </div>
+    <div>
+      <label for="responseText">Response:</label><br />
+      <textarea id="responseText" style="height: 2em; width: 100%" name="Response" readonly></textarea>
+    </div>
+    <div style="display: flex; justify-content: center;">
+      <button id="startButton" class="start">Start</button>
+    </div>
+  </div>
+  <script type="module" src="script.js"></script>
+</body>
+
+</html>
