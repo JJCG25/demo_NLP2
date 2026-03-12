@@ -1,4 +1,3 @@
-// --- Importaciones ---
 import {
     AutoProcessor,
     AutoModelForImageTextToText,
@@ -6,9 +5,13 @@ import {
     env
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers/dist/transformers.min.js";
 
-// CONFIGURACIÓN DE ENTORNO
-env.allowLocalModels = false;
+// --- CONFIGURACIÓN DE ENTORNO (OPTIMIZADO PARA CPU) ---
+env.allowLocalModels = true; 
+env.localModelPath = './models/'; 
 env.useBrowserCache = true;
+
+// Habilitar multi-hilo 
+env.backends.onnx.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
@@ -19,14 +22,12 @@ function autoResizeTextarea(el) {
 
 // VARIABLES GLOBALES
 let video, canvas, processor, model, stream;
-let isProcessing = false;
+let isThinking = false;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay;
 
-// Helper: set response text
 function setResponse(text) {
-    console.log("[Status]", text);
     if (responseText) {
         responseText.value = text;
         autoResizeTextarea(responseText);
@@ -45,66 +46,33 @@ async function initCamera() {
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
         await video.play();
-        setResponse("Model loading...");
     } catch (err) {
-        console.error("Camera error:", err);
-        setResponse("Could not connect to camera. Please check your permissions.");
+        setResponse("Could not connect to camera.");
     }
 }
 
 async function initModel() {
     const modelId = "onnx-community/FastVLM-0.5B-ONNX";
     setLoadingVisible(true);
-    setResponse("Model loading...");
-
-    let useWebGPU = false;
-    if (navigator.gpu) {
-        try {
-            const adapter = await navigator.gpu.requestAdapter();
-            if (adapter) {
-                const info = adapter.info || {};
-                const desc = (info.description || "").toLowerCase();
-                if (!desc.includes("software") && !desc.includes("swiftshader")) {
-                    useWebGPU = true;
-                }
-            }
-        } catch (e) {
-            console.warn("WebGPU adapter request failed:", e);
-        }
-    }
-
-
-    function onProgress(p) {
-        if (p.status === "downloading" && p.total > 0) {
-            const pct = Math.round((p.loaded / p.total) * 100);
-            const name = (p.file || "").split("/").pop();
-            setResponse(`Model loading... ${pct}%`);
-        } else if (p.status === "loading") {
-            setResponse("Model loading...");
-        } else if (p.status === "done") {
-        }
-    }
+    setResponse("Loading WASM Model (CPU)...");
 
     try {
-        console.log("Loading processor...");
-        processor = await AutoProcessor.from_pretrained(modelId, { progress_callback: onProgress });
+        processor = await AutoProcessor.from_pretrained(modelId);
 
-        console.log("Loading model...");
         model = await AutoModelForImageTextToText.from_pretrained(modelId, {
-            device: useWebGPU ? "webgpu" : "wasm",
-            dtype: useWebGPU ? {
+            device: "wasm",
+            dtype: {
                 embed_tokens: "fp16",
-                vision_encoder: "q4",
-                decoder_model_merged: "q4",
-            } : "q8",
-            progress_callback: onProgress,
+                vision_encoder: "q4",      
+                decoder_model_merged: "q8", 
+            }
         });
 
-        setResponse("✅ Ready! Press Start whenever you want.");
+        // Changed text to just "Analyze"
+        setResponse("✅ Ready! Press 'Analyze' to start.");
+        startButton.textContent = "Analyze";
     } catch (err) {
-        console.error("Model Loading Error:", err);
-        setResponse(`❌ Error: ${err.message}`);
-        setLoadingVisible(false);
+        setResponse(`❌ Error loading: ${err.message}`);
     } finally {
         setLoadingVisible(false);
     }
@@ -120,34 +88,72 @@ function captureImage() {
     return new RawImage(frame.data, frame.width, frame.height, 4);
 }
 
-async function runInference() {
-    if (!model || !processor || !isProcessing) return;
+// --- TRIGGERED INFERENCE ---
+async function handleAnalyze() {
+    if (!model || isThinking) return;
 
-    const instruction = instructionText.value || "What do you see in this image?";
+    isThinking = true;
+    startButton.disabled = true;
+    
+    // Injects a self-animating SVG spinner along with the text
+    startButton.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56">
+                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
+            </path>
+        </svg>
+        Analyzing...
+    `;
+    
+    // This clears the answer section immediately when the button is pressed
+    setResponse(""); 
+
+    const instruction = instructionText.value || "What do you see?";
     const rawImg = captureImage();
-    if (!rawImg) return;
+    
+    if (!rawImg) {
+        isThinking = false;
+        startButton.disabled = false;
+        startButton.textContent = "Analyze"; // Reset to standard text
+        return;
+    }
 
     try {
-        // Prepare prompt using FastVLM format
-        const messages = [{ role: "user", content: `<image>${instruction}` }];
-        const prompt = processor.apply_chat_template(messages, {
-            add_generation_prompt: true
-        });
-
-        // Process image and text
+        const messages = [
+            { 
+                role: "system", 
+                content: "You are an expert visual analysis assistant. " + 
+                        "CRITICAL RULE: Respond ONLY in English. Be extremely concise, direct, and avoid any conversational filler." 
+            },
+            { 
+                role: "user", 
+                content: "<image>Instruction: Describe this image." 
+            },
+            { 
+                role: "assistant", 
+                content: "An office environment with several people working on computers." 
+            },
+            { 
+                role: "user", 
+                content: `Instruction: ${instruction}. Respond only in English and keep it brief.` 
+            },
+            { 
+                role: "assistant", 
+                content: "Description:" 
+            }
+        ];
+        
+        const prompt = processor.apply_chat_template(messages, { add_generation_prompt: true });
         const inputs = await processor(rawImg, prompt);
 
-        // Generate text
-        const generateOptions = {
+        const outputs = await model.generate({
             ...inputs,
-            max_new_tokens: 128,
-            do_sample: false,
-        };
+            max_new_tokens: 64, 
+            do_sample: false, 
+            temperature: 0.0,
+            repetition_penalty: 1.2,
+        });
 
-
-        const outputs = await model.generate(generateOptions);
-
-        // Decode output, slicing off the prompt tokens
         const decoded = processor.batch_decode(
             outputs.slice(null, [inputs.input_ids.dims.at(-1), null]),
             { skip_special_tokens: true }
@@ -156,92 +162,29 @@ async function runInference() {
         setResponse(decoded[0].trim());
 
     } catch (e) {
-        console.error("Inference Error:", e);
-        setResponse(`Something went wrong: ${e.message}`);
-        handleStop();
+        setResponse(`Error: ${e.message}`);
+    } finally {
+        isThinking = false;
+        startButton.disabled = false;
+        // Reset to just "Analyze" when finished, which removes the SVG
+        startButton.textContent = "Analyze";
     }
 }
 
-
-async function loop() {
-    while (isProcessing) {
-        await runInference();
-        if (isProcessing) await new Promise(r => setTimeout(r, 1000));
-    }
-}
-
-function handleStart() {
-    if (!model) {
-        alert("Model not loaded yet.");
-        return;
-    }
-    isProcessing = true;
-    startButton.textContent = "Stop";
-    startButton.classList.replace("start", "stop");
-    setResponse("Thinking...");
-    loop();
-}
-
-function handleStop() {
-    isProcessing = false;
-    startButton.textContent = "Start";
-    startButton.classList.replace("stop", "start");
-    setResponse("Paused.");
-}
-
+// --- UI y Draggable ---
 function makeDraggable(el) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-
     el.addEventListener('mousedown', dragStart);
-    el.addEventListener('touchstart', dragStart, { passive: false });
-
     function dragStart(e) {
-        // Only drag if clicking the panel itself or the label, not textareas or buttons
         if (['TEXTAREA', 'BUTTON'].includes(e.target.tagName)) return;
-
-        const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
-        const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
-
-        pos3 = clientX;
-        pos4 = clientY;
-
-        document.addEventListener('mouseup', dragEnd);
-        document.addEventListener('mousemove', dragMove);
-        document.addEventListener('touchend', dragEnd);
-        document.addEventListener('touchmove', dragMove, { passive: false });
-
-        el.style.cursor = 'grabbing';
-    }
-
-    function dragMove(e) {
-        const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
-        const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
-
-        pos1 = pos3 - clientX;
-        pos2 = pos4 - clientY;
-        pos3 = clientX;
-        pos4 = clientY;
-
-        // Reset transform if it's currently used for centering
-        if (el.style.transform !== 'none') {
-            const rect = el.getBoundingClientRect();
-            el.style.transform = 'none';
-            el.style.top = rect.top + 'px';
-            el.style.left = rect.left + 'px';
-            el.style.bottom = 'auto'; // Disable bottom constraint
-            el.style.margin = '0';
-        }
-
-        el.style.top = (el.offsetTop - pos2) + "px";
-        el.style.left = (el.offsetLeft - pos1) + "px";
-    }
-
-    function dragEnd() {
-        document.removeEventListener('mouseup', dragEnd);
-        document.removeEventListener('mousemove', dragMove);
-        document.removeEventListener('touchend', dragEnd);
-        document.removeEventListener('touchmove', dragMove);
-        el.style.cursor = 'grab';
+        pos3 = e.clientX; pos4 = e.clientY;
+        document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
+        document.onmousemove = (e) => {
+            pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+            pos3 = e.clientX; pos4 = e.clientY;
+            el.style.top = (el.offsetTop - pos2) + "px";
+            el.style.left = (el.offsetLeft - pos1) + "px";
+        };
     }
 }
 
@@ -252,18 +195,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     loadingOverlay = document.getElementById("loadingOverlay");
     canvas = document.getElementById("canvas");
 
-    instructionText.value = "What do you see?";
+    startButton.addEventListener("click", handleAnalyze);
 
-    startButton.addEventListener("click", () => isProcessing ? handleStop() : handleStart());
-
-    // Initialize in order
     const ioAreas = document.querySelector('.io-areas');
     if (ioAreas) makeDraggable(ioAreas);
 
     await initCamera();
     await initModel();
-});
-
-window.addEventListener("beforeunload", () => {
-    if (stream) stream.getTracks().forEach(t => t.stop());
 });
