@@ -55,17 +55,17 @@ async function initCamera() {
 async function initModel() {
     const modelId = "onnx-community/FastVLM-0.5B-ONNX";
     setLoadingVisible(true);
-    setResponse("Loading WASM Model (CPU)...");
+    setResponse("Loading model (WebGPU)...");
 
     try {
         processor = await AutoProcessor.from_pretrained(modelId);
 
         model = await AutoModelForImageTextToText.from_pretrained(modelId, {
-            device: "wasm",
+            device: "webgpu",
             dtype: {
                 embed_tokens: "fp16",
-                vision_encoder: "q4",      
-                decoder_model_merged: "q8", 
+                vision_encoder: "q4",
+                decoder_model_merged: "q4",
             }
         });
 
