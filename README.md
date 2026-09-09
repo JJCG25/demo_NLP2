@@ -22,15 +22,13 @@ A premium, immersive web application that uses the **FastVLM-0.5B-ONNX** model t
    cd demo_NLP
    ```
 2. **Start a local server**:
-   You can use any light server. Here are two quick ways:
-   - **Using Python** (recommended):
-     ```bash
-     python -m http.server 8000
-     ```
-   - **Using Node.js** (if you have `http-server` installed):
-     ```bash
-     npx http-server -p 8000
-     ```
+   Use the bundled server so the model can run multi-threaded:
+   ```bash
+   python serve.py 8000
+   ```
+   It sends the `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy`
+   headers that enable `SharedArrayBuffer`. Plain `python -m http.server` works
+   too, but forces ONNX Runtime into slow single-threaded mode.
 3. **Open the app**:
    Navigate to `http://localhost:8000` in your browser.
 

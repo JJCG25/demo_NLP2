@@ -3,11 +3,12 @@ import {
     AutoModelForImageTextToText,
     RawImage,
     env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers/dist/transformers.min.js";
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/transformers.min.js";
 
 // --- CONFIGURACIÓN DE ENTORNO (OPTIMIZADO PARA CPU) ---
-env.allowLocalModels = true; 
-env.localModelPath = './models/'; 
+// Load straight from the HuggingFace Hub. There is no local ./models/ copy,
+// so leaving this on just produced a failed 404 round-trip per file.
+env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 // Habilitar multi-hilo 
