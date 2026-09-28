@@ -138,8 +138,10 @@ salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
 - **Speech in**: Whisper `small` (int8) on the CPUs via faster-whisper, in the
   same job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
   `script.js` to use Chrome's recogniser instead, which streams it to Google
-- **Speech out**: Piper (`es_ES-davefx-medium`) on the same CPUs, served as WAV
-  from `/speak`. A laptop's system voices sound robotic and the good-sounding
+- **Speech out**: Piper (`es_MX-ald-medium`, neutral Latin American) on the same
+  CPUs, loaded once and served as WAV from `/speak`. `TTS_VOICE_NAME` picks
+  another of the downloaded voices; Piper has no Colombian voice, so es_MX is the
+  closest fit. A laptop's system voices sound robotic and the good-sounding
   browser voices synthesise in the cloud, so this keeps both quality and privacy.
   Falls back to `speechSynthesis` if `/speak` is unavailable; set
   `TTS_BACKEND = "browser"` in `script.js` to prefer the laptop's voices

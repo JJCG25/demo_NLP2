@@ -78,17 +78,24 @@ WHISPER
 
 # Piper voice for the answers. Local neural speech: the system voices on a laptop
 # sound robotic, and the good-sounding browser voices synthesise in the cloud.
-echo "==> Downloading the Piper voice (~60MB)"
+echo "==> Downloading the Piper voices (~200MB)"
 mkdir -p "$DISK_ROOT/piper"
 python - <<VOICE
 from huggingface_hub import hf_hub_download
 import shutil, pathlib
 
 dest = pathlib.Path("$DISK_ROOT/piper")
-base = "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx"
-for name in (base, base + ".json"):
-    src = hf_hub_download("rhasspy/piper-voices", name)
-    shutil.copy(src, dest / pathlib.Path(name).name)
+# es_MX is neutral Latin American (the default), es_ES Castilian, es_AR female.
+# Piper has no Colombian voice, so es_MX is the closest fit.
+voices = [
+    "es/es_MX/ald/medium/es_MX-ald-medium.onnx",
+    "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx",
+    "es/es_AR/daniela/high/es_AR-daniela-high.onnx",
+]
+for name in voices:
+    for f in (name, name + ".json"):
+        src = hf_hub_download("rhasspy/piper-voices", f)
+        shutil.copy(src, dest / pathlib.Path(f).name)
     print(" ", pathlib.Path(name).name)
 VOICE
 
