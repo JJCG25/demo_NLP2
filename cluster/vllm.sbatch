@@ -82,7 +82,9 @@ echo
 #   STT_MODEL=base sbatch cluster/vllm.sbatch
 # Only sizes setup_env.sh downloaded work here: HF_HUB_OFFLINE=1 means an
 # unknown size fails to load and the service never opens its port.
-STT_THREADS=12 STT_MODEL="${STT_MODEL:-small}" python -m uvicorn cluster.stt_server:app \
+STT_THREADS=12 STT_MODEL="${STT_MODEL:-small}" \
+    TTS_VOICE="$DISK_ROOT/piper/es_ES-davefx-medium.onnx" \
+    python -m uvicorn cluster.stt_server:app \
     --host 0.0.0.0 --port "$PORT_STT" --log-level warning &
 STT_PID=$!
 trap 'kill $STT_PID 2>/dev/null' EXIT

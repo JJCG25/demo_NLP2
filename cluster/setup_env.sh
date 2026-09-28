@@ -52,7 +52,7 @@ pip install -q vllm
 # Local speech-to-text, so microphone audio never leaves the machine. CPU only:
 # the GPUs are taken by the vision model.
 echo "==> Installing faster-whisper and the STT service deps"
-pip install -q faster-whisper fastapi uvicorn python-multipart
+pip install -q faster-whisper fastapi uvicorn python-multipart piper-tts
 
 echo "==> vLLM version:"
 python -c "import vllm; print(vllm.__version__)"
@@ -75,6 +75,22 @@ for size in ("base", "small"):
     WhisperModel(size, device="cpu", compute_type="int8")
 print("done")
 WHISPER
+
+# Piper voice for the answers. Local neural speech: the system voices on a laptop
+# sound robotic, and the good-sounding browser voices synthesise in the cloud.
+echo "==> Downloading the Piper voice (~60MB)"
+mkdir -p "$DISK_ROOT/piper"
+python - <<VOICE
+from huggingface_hub import hf_hub_download
+import shutil, pathlib
+
+dest = pathlib.Path("$DISK_ROOT/piper")
+base = "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx"
+for name in (base, base + ".json"):
+    src = hf_hub_download("rhasspy/piper-voices", name)
+    shutil.copy(src, dest / pathlib.Path(name).name)
+    print(" ", pathlib.Path(name).name)
+VOICE
 
 echo
 echo "Setup complete. Now submit the server job:"

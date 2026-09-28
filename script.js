@@ -85,6 +85,13 @@ const WAKE_WORDS = ["oye", "asistente", "hola"];
 const STT_BACKEND = "local";
 const STT_URL = "http://localhost:8100/transcribe";
 
+// Speech out. "local" plays Piper from the workstation: a neural voice, and the
+// answer text stays on the machine. "browser" uses the laptop's own voices, which
+// on Windows sound robotic unless Chrome picks a cloud one. Local falls back to
+// the browser automatically if /speak is unavailable.
+const TTS_BACKEND = "local";
+const TTS_URL = "http://localhost:8100/speak";
+
 // Voice activity detection for the local backend. SPEECH_RMS is loudness on a
 // 0..1 scale: raise it in a noisy room, lower it if quiet speech is missed.
 const SPEECH_RMS = 0.02;
@@ -158,6 +165,8 @@ function pickVoice() {
 function resetSpeech() {
     spokenUpTo = 0;
     if ("speechSynthesis" in window) speechSynthesis.cancel();
+    stopLocalSpeech();
+    speaking = false;
 }
 
 function flushSpeech(fullText, finished) {
@@ -176,22 +185,93 @@ function flushSpeech(fullText, finished) {
     const text = pending.trim();
     if (!text) return;
 
+    if (TTS_BACKEND === "local") enqueueLocalSpeech(text);
+    else speakWithBrowser(text);
+}
+
+// Mic must stay shut from the moment there is speech pending, not from the moment
+// audio starts: otherwise the watchdog reopens it during the gap and hands-free
+// mode transcribes the demo's own answer.
+function beginSpeaking() {
+    speaking = true;
+    if (STT_BACKEND === "browser") {
+        if (recognition && listening) recognition.stop();
+    } else if (listening) {
+        stopLocalListening();
+    }
+}
+
+function endSpeaking() {
+    speaking = false;
+    maybeResumeListening();
+}
+
+function speakWithBrowser(text) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "es-ES";
     if (spanishVoice) utterance.voice = spanishVoice;
-
-    // Close the mic while the speaker is on, or hands-free mode transcribes the
-    // demo's own answer and asks itself about it.
-    utterance.addEventListener("start", () => {
-        speaking = true;
-        if (recognition && listening) recognition.stop();
-    });
-    utterance.addEventListener("end", () => {
-        speaking = false;
-        maybeResumeListening();
-    });
-
+    utterance.addEventListener("start", beginSpeaking);
+    utterance.addEventListener("end", endSpeaking);
     speechSynthesis.speak(utterance);
+}
+
+// --- Voz local (Piper en la workstation) ---
+// Sentences are synthesised one at a time so speech starts while the model is
+// still writing. The chain keeps them in order: the requests would otherwise
+// finish out of sequence and the answer would be read scrambled.
+let ttsChain = Promise.resolve();
+let ttsQueue = [];
+let ttsAudio = null;
+let ttsPlaying = false;
+
+function enqueueLocalSpeech(text) {
+    beginSpeaking();
+    ttsChain = ttsChain.then(() => synthesise(text)).catch(() => {});
+}
+
+async function synthesise(text) {
+    try {
+        const res = await fetch(TTS_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        ttsQueue.push(URL.createObjectURL(await res.blob()));
+        playQueued();
+    } catch (e) {
+        console.warn(`[tts] Piper no disponible (${e.message}), uso la voz del navegador`);
+        speakWithBrowser(text);
+    }
+}
+
+function playQueued() {
+    if (ttsPlaying || !ttsQueue.length) return;
+
+    const url = ttsQueue.shift();
+    ttsPlaying = true;
+    if (!ttsAudio) ttsAudio = new Audio();
+    ttsAudio.src = url;
+
+    const done = () => {
+        URL.revokeObjectURL(url);
+        ttsPlaying = false;
+        if (ttsQueue.length) playQueued();
+        else endSpeaking();
+    };
+    ttsAudio.onended = done;
+    ttsAudio.onerror = done;
+    ttsAudio.play().catch(() => done());
+}
+
+function stopLocalSpeech() {
+    ttsQueue.forEach(URL.revokeObjectURL);
+    ttsQueue = [];
+    ttsPlaying = false;
+    if (ttsAudio) {
+        ttsAudio.pause();
+        ttsAudio.src = "";
+    }
 }
 
 function setTtsEnabled(on) {
@@ -856,7 +936,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             remembered = localStorage.getItem("tts") ?? "0";
         } catch (e) { /* see setTtsEnabled */ }
         setTtsEnabled(remembered === "1");
-    } else {
+    } else if (TTS_BACKEND !== "local") {
+        // Only hide the toggle when there is no way to speak at all: with Piper
+        // the browser's own synthesis is just the fallback.
         speakToggle.style.display = "none";
     }
 

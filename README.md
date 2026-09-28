@@ -138,10 +138,11 @@ salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
 - **Speech in**: Whisper `small` (int8) on the CPUs via faster-whisper, in the
   same job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
   `script.js` to use Chrome's recogniser instead, which streams it to Google
-- **Speech out**: the browser's `speechSynthesis`, preferring a voice with
-  `localService` so the answer text is synthesised on the laptop. Chrome's
-  "Google ..." voices render on Google's servers; the console logs which one was
-  picked, so check it before a public demo
+- **Speech out**: Piper (`es_ES-davefx-medium`) on the same CPUs, served as WAV
+  from `/speak`. A laptop's system voices sound robotic and the good-sounding
+  browser voices synthesise in the cloud, so this keeps both quality and privacy.
+  Falls back to `speechSynthesis` if `/speak` is unavailable; set
+  `TTS_BACKEND = "browser"` in `script.js` to prefer the laptop's voices
 - **Storage**: venv, HF cache and compile caches all under `/disk/$USER`, never `$HOME`
 - **Precision**: `float16`, required — T4 (sm75) has no bfloat16 support
 - **Why not Qwen3-VL**: it has [no vLLM backend for Turing GPUs](https://github.com/vllm-project/vllm/issues/29743)
