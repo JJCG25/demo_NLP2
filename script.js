@@ -71,6 +71,10 @@ const MODES = [
 // touch the demo asks itself a question and keeps rotating. Set to 0 to disable.
 const IDLE_MS = 30000;
 
+// How long an analysis may take before the app assumes it hung and recovers. A
+// slow answer on four T4s is under 20s, so a minute means something broke.
+const BUSY_TIMEOUT_MS = 60000;
+
 // Speech recognition locale. "es-CO", "es-MX" or "es-AR" recognise local accents
 // noticeably better than the Castilian default.
 const SPEECH_LANG = "es-ES";
@@ -699,8 +703,29 @@ function captureImage() {
     return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
 }
 
+// Two bugs in one evening left isThinking stuck with nothing to clear it, and
+// both looked like a frozen demo. Rather than trusting every path to unset it,
+// this gives the busy state a deadline: nothing here legitimately takes a minute,
+// so anything that does is a bug, and at a stand recovering beats being correct.
+let busyWatchdog = null;
+
+function armBusyWatchdog() {
+    clearTimeout(busyWatchdog);
+    busyWatchdog = setTimeout(() => {
+        if (!isThinking) return;
+        console.warn("[watchdog] análisis colgado, recuperando la app");
+        setResponse("Se quedó colgado. Ya puedes preguntar otra vez.");
+        setTiming("");
+        resetSpeech();
+        setBusy(false);
+        maybeResumeListening();
+    }, BUSY_TIMEOUT_MS);
+}
+
 function setBusy(busy) {
     isThinking = busy;
+    if (busy) armBusyWatchdog();
+    else clearTimeout(busyWatchdog);
     startButton.disabled = busy;
     micButton.disabled = busy;
     presetsBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
