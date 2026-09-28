@@ -68,6 +68,33 @@ Then open `http://localhost:8080`. Port 8080, not 8000 — the tunnel owns 8000.
 3. **Ask something**: Type an instruction (e.g. "¿Qué hay sobre la mesa?") and
    press **Analyze**. One frame is captured and analyzed per press.
 
+## 📏 Measuring latency
+
+Measure on the compute node against `localhost`, so neither the network nor the
+browser is in the numbers. With the server already running, open a second shell
+into the same allocation:
+
+```bash
+srun --jobid <jobid> --overlap --pty bash    # or a second shell inside salloc
+source /disk/$USER/venv/bin/activate
+python cluster/bench.py --port <port>                    # single size
+python cluster/bench.py --port <port> --sweep 512,768,1024   # find the knee
+```
+
+It reports two numbers per frame size, and they have different causes:
+
+- **Time to first token** — prefill plus vision encoding. This is what grows
+  with image size, so it's the number `MAX_SIDE` moves.
+- **Decode tok/s** — steady-state generation. This is what model size and
+  tensor parallelism move; `MAX_TOKENS` multiplies it.
+
+Add them and you have what the user waits for. If TTFT dominates, shrink the
+frame. If decode dominates, shorten the answer or try TP=2 against TP=4.
+
+The browser also prints its own latency under each answer, and logs tokens and
+frame size to the console — that one includes the tunnel, so comparing the two
+tells you what the network is costing you (should be milliseconds).
+
 ## ⚡ Tuning latency
 Expect a few seconds per answer. T4s are pre-Ampere, so there is no
 FlashAttention-2 and no bf16, and a 32B model is genuinely heavy. In order of
