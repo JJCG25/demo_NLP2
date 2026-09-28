@@ -49,6 +49,11 @@ echo "==> Installing vLLM (this pulls a matching torch, several GB)"
 pip install -q --upgrade pip
 pip install -q vllm
 
+# Local speech-to-text, so microphone audio never leaves the machine. CPU only:
+# the GPUs are taken by the vision model.
+echo "==> Installing faster-whisper and the STT service deps"
+pip install -q faster-whisper fastapi uvicorn python-multipart
+
 echo "==> vLLM version:"
 python -c "import vllm; print(vllm.__version__)"
 
@@ -58,6 +63,13 @@ from huggingface_hub import snapshot_download
 snapshot_download("$MODEL")
 print("done")
 PY
+
+echo "==> Pre-downloading the Whisper weights (~500MB)"
+python - <<WHISPER
+from faster_whisper import WhisperModel
+WhisperModel("small", device="cpu", compute_type="int8")
+print("done")
+WHISPER
 
 echo
 echo "Setup complete. Now submit the server job:"

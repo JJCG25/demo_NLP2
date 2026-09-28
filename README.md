@@ -55,10 +55,13 @@ starts only pay the load time, not the download.
 
 ### 4. Open the tunnel (on the laptop)
 ```bash
-ssh -L 8000:<compute-node>:<port> user@login-host    # see the job log
+ssh -L 8000:<node>:<vllm-port> -L 8100:<node>:<stt-port> user@login-host
 ```
-Leave it running. Two hops in one command: your laptop reaches the login node,
-which reaches the compute node. This is why no CORS setup or exposed port is needed.
+Both ports come from the job log. Leave it running. Two hops in one command:
+your laptop reaches the login node, which reaches the compute node. This is why
+no CORS setup or exposed port is needed.
+
+Port 8000 carries the vision model, 8100 the speech-to-text service.
 
 ### 5. Serve the page (on the laptop)
 ```bash
@@ -132,6 +135,9 @@ salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
 ## 📝 Technical Notes
 - **Model**: [`Qwen/Qwen2.5-VL-32B-Instruct-AWQ`](https://huggingface.co/Qwen/Qwen2.5-VL-32B-Instruct-AWQ) (int4, ~20 GB)
 - **Engine**: vLLM, OpenAI-compatible `/v1/chat/completions`, inside a Slurm job
+- **Speech**: Whisper `small` (int8) on the CPUs via faster-whisper, in the same
+  job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
+  `script.js` to use Chrome's recogniser instead, which streams it to Google
 - **Storage**: venv, HF cache and compile caches all under `/disk/$USER`, never `$HOME`
 - **Precision**: `float16`, required — T4 (sm75) has no bfloat16 support
 - **Why not Qwen3-VL**: it has [no vLLM backend for Turing GPUs](https://github.com/vllm-project/vllm/issues/29743)

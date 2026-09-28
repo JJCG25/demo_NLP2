@@ -79,6 +79,18 @@ const SPEECH_LANG = "es-ES";
 // hears "oye" reliably, whole phrases much less so.
 const WAKE_WORDS = ["oye", "asistente", "hola"];
 
+// "local"   -> Whisper on the workstation CPUs. Nothing leaves the machine, and
+//              it needs the second tunnel (-L 8100:<node>:<stt port>).
+// "browser" -> Chrome's SpeechRecognition, which streams the audio to Google.
+const STT_BACKEND = "local";
+const STT_URL = "http://localhost:8100/transcribe";
+
+// Voice activity detection for the local backend. SPEECH_RMS is loudness on a
+// 0..1 scale: raise it in a noisy room, lower it if quiet speech is missed.
+const SPEECH_RMS = 0.02;
+const SILENCE_MS = 900;          // pause that ends an utterance
+const MAX_UTTERANCE_MS = 15000;  // hard stop, so one noise cannot record forever
+
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
     if (!el) return;
@@ -185,45 +197,209 @@ function setTtsEnabled(on) {
 }
 
 // --- ESCUCHA (voz a voz) ---
-// Push to talk rather than always-on listening: a stand is noisy, and a mic that
-// is always open picks up the crowd and the demo's own answers.
+// Two backends. "local" records audio and posts it to Whisper on the
+// workstation, so nothing leaves the machine; "browser" uses Chrome's
+// SpeechRecognition, which streams the microphone to Google's servers.
+// Push to talk rather than always-on listening by default: a stand is noisy, and
+// an open mic picks up the crowd and the demo's own answers.
 let recognition = null;
 let listening = false;      // the mic is open right now
-let wantListening = false;  // it should be open, even if Chrome just closed it
+let wantListening = false;  // it should be open, even if it just closed
 let handsFree = false;      // listen continuously and wait for a wake word
 let speaking = false;       // the demo is talking, so the mic must stay shut
 
-function initSpeechRecognition() {
-    const Impl = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Impl) {
-        micButton.style.display = "none";
-        handsFreeButton.style.display = "none";
+// Local backend state
+let audioStream = null, analyser = null, vadTimer = null;
+let recorder = null, chunks = [], recording = false, forcedRecording = false;
+let silenceSince = 0, recordingSince = 0;
+
+// In hands-free mode everything is ignored until a wake word shows up, so the
+// crowd's conversation does not keep triggering the demo. What follows the wake
+// word is the question; a bare "oye" falls back to the mode's own question.
+function extractAfterWakeWord(transcript) {
+    const lower = transcript.toLowerCase();
+    for (const word of WAKE_WORDS) {
+        const at = lower.indexOf(word);
+        if (at === -1) continue;
+        const rest = transcript.slice(at + word.length).replace(/^[\s,.:;!?¿¡]+/, "").trim();
+        return rest || currentMode.question;
+    }
+    return "";
+}
+
+function paintMicState() {
+    micButton.classList.toggle("listening", listening);
+    micButton.textContent = handsFree ? "👂" : (listening ? "⏹" : "🎤");
+    micButton.classList.toggle("hands-free", handsFree);
+}
+
+// Whatever the backend heard ends up here.
+function onTranscript(transcript) {
+    const question = handsFree ? extractAfterWakeWord(transcript) : transcript.trim();
+    if (!question) {
+        // Heard something, but not for us. Keep waiting.
+        maybeResumeListening();
         return;
     }
+    instructionText.value = question;
+    autoResizeTextarea(instructionText);
+    handleAnalyze();
+}
+
+// --- Backend local: Whisper en la workstation ---
+async function ensureMic() {
+    if (audioStream) return true;
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+    } catch (e) {
+        setResponse("Permite el acceso al micrófono para hablarle.");
+        return false;
+    }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(audioStream).connect(analyser);
+    return true;
+}
+
+// Loudness of the current frame, 0..1. Cheap enough to run every 50ms and it is
+// all the voice detection this needs.
+function micLevel() {
+    const buf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    return Math.sqrt(sum / buf.length);
+}
+
+function startRecording() {
+    chunks = [];
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus" : "audio/webm";
+    recorder = new MediaRecorder(audioStream, { mimeType: mime });
+    recorder.addEventListener("dataavailable", (e) => chunks.push(e.data));
+    recorder.addEventListener("stop", sendUtterance);
+    recorder.start();
+    recording = true;
+    recordingSince = Date.now();
+}
+
+function stopRecording() {
+    if (recorder && recording) recorder.stop();
+    recording = false;
+    forcedRecording = false;
+}
+
+async function sendUtterance() {
+    const blob = new Blob(chunks, { type: "audio/webm" });
+    chunks = [];
+
+    // A fragment this short is a cough or a door, not a question.
+    if (blob.size < 4000) {
+        maybeResumeListening();
+        return;
+    }
+
+    setResponse("Transcribiendo...");
+    const form = new FormData();
+    form.append("audio", blob, "utterance.webm");
+
+    try {
+        const res = await fetch(STT_URL, { method: "POST", body: form });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        setTiming(`voz: ${body.seconds}s`);
+        if (body.text) {
+            onTranscript(body.text);
+        } else {
+            maybeResumeListening();
+        }
+    } catch (e) {
+        setResponse(`No se pudo transcribir (${e.message}). ¿Está abierto el túnel del puerto 8100?`);
+        paintMicState();
+    }
+}
+
+function vadTick() {
+    // Never record while the demo talks or thinks, or it transcribes its own
+    // answer and asks itself about it.
+    if (speaking || isThinking) {
+        if (recording) stopRecording();
+        return;
+    }
+
+    const loud = micLevel() > SPEECH_RMS;
+
+    if (!recording) {
+        if (loud || forcedRecording) startRecording();
+        return;
+    }
+
+    if (loud) {
+        silenceSince = 0;
+    } else if (!silenceSince) {
+        silenceSince = Date.now();
+    } else if (Date.now() - silenceSince > SILENCE_MS) {
+        // A pause this long means they finished the sentence.
+        listening = false;
+        clearInterval(vadTimer);
+        vadTimer = null;
+        paintMicState();
+        stopRecording();
+        return;
+    }
+
+    if (Date.now() - recordingSince > MAX_UTTERANCE_MS) {
+        stopRecording();
+    }
+}
+
+function startLocalListening(forceRecord) {
+    silenceSince = 0;
+    forcedRecording = forceRecord;
+    listening = true;
+    if (!vadTimer) vadTimer = setInterval(vadTick, 50);
+    paintMicState();
+}
+
+function stopLocalListening() {
+    if (vadTimer) clearInterval(vadTimer);
+    vadTimer = null;
+    if (recording) {
+        // Drop what was being recorded: the user asked it to stop.
+        chunks = [];
+        stopRecording();
+    }
+    listening = false;
+    paintMicState();
+}
+
+// --- Backend del navegador: SpeechRecognition (el audio va a Google) ---
+function initBrowserSTT() {
+    const Impl = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Impl) return false;
 
     recognition = new Impl();
     recognition.lang = SPEECH_LANG;
     recognition.interimResults = true;
 
     recognition.addEventListener("result", (e) => {
-        // Only the newest utterance matters; earlier ones were already handled.
         const result = e.results[e.results.length - 1];
         const transcript = result[0].transcript;
 
-        // Show the words as they are recognised, so people can see it heard them.
+        // Show the words as they are recognised, so people see it heard them.
         if (!handsFree) {
             instructionText.value = transcript;
             autoResizeTextarea(instructionText);
         }
         if (!result.isFinal) return;
-
-        const question = handsFree ? extractAfterWakeWord(transcript) : transcript.trim();
-        if (!question) return;
-
-        instructionText.value = question;
-        autoResizeTextarea(instructionText);
-        if (!handsFree) setListening(false);
-        handleAnalyze();
+        if (!handsFree) {
+            listening = false;
+            paintMicState();
+        }
+        onTranscript(transcript);
     });
 
     recognition.addEventListener("end", () => {
@@ -243,30 +419,10 @@ function initSpeechRecognition() {
         }
         paintMicState();
     });
+    return true;
 }
 
-// In hands-free mode everything is ignored until a wake word shows up, so the
-// crowd's conversation does not keep triggering the demo. What follows the wake
-// word is the question; a bare "oye" falls back to the mode's own question.
-function extractAfterWakeWord(transcript) {
-    const lower = transcript.toLowerCase();
-    for (const word of WAKE_WORDS) {
-        const at = lower.indexOf(word);
-        if (at === -1) continue;
-        const rest = transcript.slice(at + word.length).replace(/^[\s,.:;!?]+/, "").trim();
-        return rest || currentMode.question;
-    }
-    return "";
-}
-
-function paintMicState() {
-    micButton.classList.toggle("listening", listening);
-    micButton.textContent = handsFree ? "👂" : (listening ? "⏹" : "🎤");
-    micButton.classList.toggle("hands-free", handsFree);
-}
-
-function startRecognition() {
-    if (!recognition) return;
+function startBrowserListening() {
     try {
         recognition.start();
         listening = true;
@@ -276,21 +432,36 @@ function startRecognition() {
     paintMicState();
 }
 
-// Returns true when it took responsibility for restarting the mic.
+// --- Control común ---
+function initSpeech() {
+    const ok = STT_BACKEND === "browser"
+        ? initBrowserSTT()
+        : (window.MediaRecorder && navigator.mediaDevices);
+
+    if (!ok) {
+        micButton.style.display = "none";
+        handsFreeButton.style.display = "none";
+    }
+}
+
+// Returns true when it took responsibility for reopening the mic.
 function maybeResumeListening() {
     if (!wantListening || !handsFree || speaking || isThinking) return false;
     setTimeout(() => {
-        if (wantListening && handsFree && !speaking && !isThinking) startRecognition();
+        if (!wantListening || !handsFree || speaking || isThinking) return;
+        if (STT_BACKEND === "browser") startBrowserListening();
+        else startLocalListening(false);
     }, 300);
     return true;
 }
 
-function toggleListening() {
-    if (!recognition || isThinking) return;
+async function toggleListening() {
+    if (isThinking) return;
 
     if (listening) {
         wantListening = false;
-        recognition.stop();
+        if (STT_BACKEND === "browser") recognition.stop();
+        else stopLocalListening();
         return;
     }
 
@@ -302,23 +473,36 @@ function toggleListening() {
 
     wantListening = true;
     setResponse("Escuchando...");
-    startRecognition();
+
+    if (STT_BACKEND === "browser") {
+        startBrowserListening();
+    } else {
+        if (!await ensureMic()) return;
+        startLocalListening(true);
+    }
 }
 
-function toggleHandsFree() {
-    if (!recognition) return;
-
+async function toggleHandsFree() {
     handsFree = !handsFree;
-    recognition.continuous = handsFree;
+    if (recognition) recognition.continuous = handsFree;
 
     if (handsFree) {
         if (!ttsEnabled) setTtsEnabled(true);
         wantListening = true;
         setResponse(`Manos libres: di "${WAKE_WORDS[0]}" y tu pregunta.`);
-        if (!listening) startRecognition();
+        if (STT_BACKEND === "browser") {
+            if (!listening) startBrowserListening();
+        } else {
+            if (!await ensureMic()) { handsFree = false; return; }
+            if (!listening) startLocalListening(false);
+        }
     } else {
         wantListening = false;
-        if (listening) recognition.stop();
+        if (STT_BACKEND === "browser") {
+            if (listening) recognition.stop();
+        } else {
+            stopLocalListening();
+        }
     }
     paintMicState();
 }
@@ -614,7 +798,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     renderModes();
     renderPresets();
-    initSpeechRecognition();
+    initSpeech();
 
     if ("speechSynthesis" in window) {
         pickVoice();

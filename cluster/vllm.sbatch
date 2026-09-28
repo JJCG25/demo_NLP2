@@ -54,8 +54,9 @@ export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 
 # Derived from the job id so two jobs on one node cannot collide. The browser
-# side of the tunnel is always 8000, so script.js needs no edit.
+# side of the tunnel is always 8000 and 8100, so script.js needs no edit.
 PORT=$((8000 + SLURM_JOB_ID % 1000))
+PORT_STT=$((9000 + SLURM_JOB_ID % 1000))
 
 echo "Job $SLURM_JOB_ID on $SLURMD_NODENAME"
 echo "GPUs: $CUDA_VISIBLE_DEVICES | CPUs: $SLURM_CPUS_PER_TASK"
@@ -65,10 +66,21 @@ echo "=============================================================="
 echo " Once you see 'Application startup complete', run THIS on your"
 echo " laptop (replace the login host), and keep it open:"
 echo
-echo "   ssh -L 8000:$SLURMD_NODENAME:$PORT <user>@<login-host>"
+echo "   ssh -L 8000:$SLURMD_NODENAME:$PORT \\"
+echo "       -L 8100:$SLURMD_NODENAME:$PORT_STT <user>@<login-host>"
 echo
 echo " Then serve the page locally: python serve.py 8080"
 echo "=============================================================="
+echo
+
+# Whisper for speech, on the CPUs that sit idle while the GPUs run the vision
+# model, so microphone audio never leaves the machine. Backgrounded: the job
+# lives and dies with vLLM below, and this goes with it.
+STT_THREADS=6 python -m uvicorn cluster.stt_server:app \
+    --host 0.0.0.0 --port "$PORT_STT" --log-level warning &
+STT_PID=$!
+trap 'kill $STT_PID 2>/dev/null' EXIT
+echo "STT (whisper, cpu) starting on port $PORT_STT, pid $STT_PID"
 echo
 
 # T4 is Turing (sm75): float16 is mandatory, since the checkpoint is bf16 and
