@@ -578,6 +578,7 @@ async function initModel() {
         serverReady = true;
         startButton.textContent = "Analizar";
     } catch (err) {
+        serverReady = false;
         setResponse(
             `❌ No se puede conectar con ${API_BASE} (${err.message}).\n` +
             `Comprueba que el túnel SSH sigue abierto.`
@@ -625,7 +626,16 @@ function setBusy(busy) {
 
 // --- TRIGGERED INFERENCE ---
 async function handleAnalyze() {
-    if (!serverReady || isThinking) return;
+    if (isThinking) return;
+
+    // Retry the connection instead of refusing in silence. The page used to give
+    // up for the whole session if it loaded before vLLM had finished starting,
+    // and this doubles as recovery when the Slurm job is restarted mid-event.
+    if (!serverReady) {
+        setResponse("Reconectando con el modelo...");
+        await initModel();
+        if (!serverReady) return;   // initModel already said what is wrong
+    }
 
     setBusy(true);
     setResponse("");
