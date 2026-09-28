@@ -29,7 +29,10 @@ camera + UI  -->  ssh hop      -->   vLLM, 4x T4, TP=4
 - **Laptop**: any modern browser and a webcam. No WebGPU needed any more.
 
 ### 2. One-time setup (on the login node)
+Clone the repo **under `/disk`**, not in `$HOME` — Slurm writes job logs into the
+directory you submit from.
 ```bash
+cd /disk/$USER && git clone <your-repo-url> && cd demo_NLP2
 bash cluster/setup_env.sh
 ```
 Creates the venv, installs vLLM and pre-downloads the ~20 GB of weights, all

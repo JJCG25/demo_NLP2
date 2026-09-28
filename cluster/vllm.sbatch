@@ -20,7 +20,8 @@
 # stages weights through host RAM; 16G gets the job OOM-killed).
 #
 # Slurm does NOT expand $USER or $HOME in #SBATCH lines, so the log paths above
-# are relative to wherever you run sbatch from.
+# are relative to wherever you run sbatch from: clone the repo under /disk and
+# submit from there, or hardcode an absolute path in the two directives.
 
 set -euo pipefail
 
@@ -38,6 +39,11 @@ export HF_HOME="$DISK_ROOT/hf"
 export VLLM_CACHE_ROOT="$DISK_ROOT/vllm-cache"
 export TRITON_CACHE_DIR="$DISK_ROOT/vllm-cache/triton"
 export TORCHINDUCTOR_CACHE_DIR="$DISK_ROOT/vllm-cache/inductor"
+# Catch-all for libraries that ignore the specific vars above and just use
+# ~/.cache, plus the NVIDIA JIT cache, which defaults to ~/.nv.
+export XDG_CACHE_HOME="$DISK_ROOT/cache"
+export CUDA_CACHE_PATH="$DISK_ROOT/cache/nv"
+mkdir -p "$DISK_ROOT"/cache/nv
 
 # Weights were pre-downloaded by setup_env.sh. Staying offline means the job
 # fails fast with a clear error instead of hanging on a blocked network if the
