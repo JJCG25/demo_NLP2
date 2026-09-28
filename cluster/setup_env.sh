@@ -64,10 +64,15 @@ snapshot_download("$MODEL")
 print("done")
 PY
 
-echo "==> Pre-downloading the Whisper weights (~500MB)"
+# Both sizes, because the job runs with HF_HUB_OFFLINE=1: asking for a size that
+# was never downloaded kills the speech service at startup, and the browser only
+# sees "failed to fetch".
+echo "==> Pre-downloading the Whisper weights (base + small, ~650MB)"
 python - <<WHISPER
 from faster_whisper import WhisperModel
-WhisperModel("small", device="cpu", compute_type="int8")
+for size in ("base", "small"):
+    print(f"  {size}...", flush=True)
+    WhisperModel(size, device="cpu", compute_type="int8")
 print("done")
 WHISPER
 
