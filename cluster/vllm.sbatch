@@ -76,7 +76,11 @@ echo
 # Whisper for speech, on the CPUs that sit idle while the GPUs run the vision
 # model, so microphone audio never leaves the machine. Backgrounded: the job
 # lives and dies with vLLM below, and this goes with it.
-STT_THREADS=6 python -m uvicorn cluster.stt_server:app \
+#
+# STT_MODEL=base is roughly twice as fast and noticeably less accurate;
+# STT_MODEL=medium is the other way round. Override when submitting:
+#   STT_MODEL=base sbatch cluster/vllm.sbatch
+STT_THREADS=12 STT_MODEL="${STT_MODEL:-small}" python -m uvicorn cluster.stt_server:app \
     --host 0.0.0.0 --port "$PORT_STT" --log-level warning &
 STT_PID=$!
 trap 'kill $STT_PID 2>/dev/null' EXIT

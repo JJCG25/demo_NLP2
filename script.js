@@ -330,6 +330,9 @@ async function sendUtterance() {
     } catch (e) {
         setResponse(`No se pudo transcribir (${e.message}). ¿Está abierto el túnel del puerto 8100?`);
         paintMicState();
+        // A failed transcription must not end the conversation: without this the
+        // mic stayed shut and hands-free mode froze.
+        maybeResumeListening();
     }
 }
 
@@ -455,6 +458,27 @@ function initSpeech() {
     }
 }
 
+// A stand runs unattended for hours, so rather than trusting every path to
+// reopen the mic, this checks a couple of times a second that hands-free mode is
+// actually listening and restarts it when it is not. It covers the failure modes
+// nobody thought of, not just the known ones.
+let watchdogTimer = null;
+
+function startWatchdog() {
+    if (watchdogTimer) return;
+    watchdogTimer = setInterval(() => {
+        if (!handsFree || !wantListening) return;
+        if (listening || isThinking || speaking) return;
+        if (STT_BACKEND === "browser") startBrowserListening();
+        else startLocalListening(false);
+    }, 2000);
+}
+
+function stopWatchdog() {
+    if (watchdogTimer) clearInterval(watchdogTimer);
+    watchdogTimer = null;
+}
+
 // Returns true when it took responsibility for reopening the mic.
 function maybeResumeListening() {
     if (!wantListening || !handsFree || speaking || isThinking) return false;
@@ -501,6 +525,7 @@ async function toggleHandsFree() {
         if (!ttsEnabled) setTtsEnabled(true);
         wantListening = true;
         setResponse(`Manos libres: di "${WAKE_WORDS[0]}" y tu pregunta.`);
+        startWatchdog();
         if (STT_BACKEND === "browser") {
             if (!listening) startBrowserListening();
         } else {
@@ -509,6 +534,7 @@ async function toggleHandsFree() {
         }
     } else {
         wantListening = false;
+        stopWatchdog();
         if (STT_BACKEND === "browser") {
             if (listening) recognition.stop();
         } else {
