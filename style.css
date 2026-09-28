@@ -261,6 +261,7 @@ textarea:focus {
 /* --- Fila de botones --- */
 .button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: stretch;
 }
@@ -413,4 +414,25 @@ button:disabled {
   50% {
     box-shadow: 0 0 0 10px rgba(213, 76, 90, 0);
   }
+}
+
+/* --- Manos libres --- */
+#handsFreeButton {
+  font-size: 20px;
+  width: 58px;
+  border-radius: 14px;
+  cursor: pointer;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
+}
+
+#handsFreeButton:hover {
+  filter: brightness(1.15);
+}
+
+#micButton.hands-free {
+  background: var(--accent-gradient);
+  border-color: #608f89;
 }

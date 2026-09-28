@@ -75,6 +75,10 @@ const IDLE_MS = 30000;
 // noticeably better than the Castilian default.
 const SPEECH_LANG = "es-ES";
 
+// Wake words for hands-free mode. Lowercase, and short ones win: the recogniser
+// hears "oye" reliably, whole phrases much less so.
+const WAKE_WORDS = ["oye", "asistente", "hola"];
+
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
     if (!el) return;
@@ -92,7 +96,7 @@ let attractorIndex = 0;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
-let modesBox, lastFrame, autoBadge, timingBox, micButton;
+let modesBox, lastFrame, autoBadge, timingBox, micButton, handsFreeButton;
 
 function setResponse(text) {
     if (!responseText) return;
@@ -152,6 +156,18 @@ function flushSpeech(fullText, finished) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "es-ES";
     if (spanishVoice) utterance.voice = spanishVoice;
+
+    // Close the mic while the speaker is on, or hands-free mode transcribes the
+    // demo's own answer and asks itself about it.
+    utterance.addEventListener("start", () => {
+        speaking = true;
+        if (recognition && listening) recognition.stop();
+    });
+    utterance.addEventListener("end", () => {
+        speaking = false;
+        maybeResumeListening();
+    });
+
     speechSynthesis.speak(utterance);
 }
 
@@ -172,60 +188,108 @@ function setTtsEnabled(on) {
 // Push to talk rather than always-on listening: a stand is noisy, and a mic that
 // is always open picks up the crowd and the demo's own answers.
 let recognition = null;
-let listening = false;
+let listening = false;      // the mic is open right now
+let wantListening = false;  // it should be open, even if Chrome just closed it
+let handsFree = false;      // listen continuously and wait for a wake word
+let speaking = false;       // the demo is talking, so the mic must stay shut
 
 function initSpeechRecognition() {
     const Impl = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Impl) {
         micButton.style.display = "none";
+        handsFreeButton.style.display = "none";
         return;
     }
 
     recognition = new Impl();
     recognition.lang = SPEECH_LANG;
-    recognition.continuous = false;   // stops on its own once the person pauses
     recognition.interimResults = true;
 
     recognition.addEventListener("result", (e) => {
-        let transcript = "";
-        let isFinal = false;
-        for (const result of e.results) {
-            transcript += result[0].transcript;
-            if (result.isFinal) isFinal = true;
-        }
+        // Only the newest utterance matters; earlier ones were already handled.
+        const result = e.results[e.results.length - 1];
+        const transcript = result[0].transcript;
 
         // Show the words as they are recognised, so people can see it heard them.
-        instructionText.value = transcript;
-        autoResizeTextarea(instructionText);
-
-        if (isFinal && transcript.trim()) {
-            setListening(false);
-            handleAnalyze();
+        if (!handsFree) {
+            instructionText.value = transcript;
+            autoResizeTextarea(instructionText);
         }
+        if (!result.isFinal) return;
+
+        const question = handsFree ? extractAfterWakeWord(transcript) : transcript.trim();
+        if (!question) return;
+
+        instructionText.value = question;
+        autoResizeTextarea(instructionText);
+        if (!handsFree) setListening(false);
+        handleAnalyze();
     });
 
-    recognition.addEventListener("end", () => setListening(false));
+    recognition.addEventListener("end", () => {
+        listening = false;
+        // Chrome ends recognition on its own after a stretch of silence, so
+        // hands-free mode has to keep restarting it.
+        if (!maybeResumeListening()) paintMicState();
+    });
 
     recognition.addEventListener("error", (e) => {
-        setListening(false);
         if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+            handsFree = false;
+            wantListening = false;
             setResponse("Permite el acceso al micrófono para hablarle.");
-        } else if (e.error === "no-speech") {
+        } else if (e.error === "no-speech" && !handsFree) {
             setResponse("No te he oído. Pulsa el micrófono y habla de nuevo.");
         }
+        paintMicState();
     });
 }
 
-function setListening(on) {
-    listening = on;
-    micButton.classList.toggle("listening", on);
-    micButton.textContent = on ? "⏹" : "🎤";
+// In hands-free mode everything is ignored until a wake word shows up, so the
+// crowd's conversation does not keep triggering the demo. What follows the wake
+// word is the question; a bare "oye" falls back to the mode's own question.
+function extractAfterWakeWord(transcript) {
+    const lower = transcript.toLowerCase();
+    for (const word of WAKE_WORDS) {
+        const at = lower.indexOf(word);
+        if (at === -1) continue;
+        const rest = transcript.slice(at + word.length).replace(/^[\s,.:;!?]+/, "").trim();
+        return rest || currentMode.question;
+    }
+    return "";
+}
+
+function paintMicState() {
+    micButton.classList.toggle("listening", listening);
+    micButton.textContent = handsFree ? "👂" : (listening ? "⏹" : "🎤");
+    micButton.classList.toggle("hands-free", handsFree);
+}
+
+function startRecognition() {
+    if (!recognition) return;
+    try {
+        recognition.start();
+        listening = true;
+    } catch (e) {
+        // Already started; harmless.
+    }
+    paintMicState();
+}
+
+// Returns true when it took responsibility for restarting the mic.
+function maybeResumeListening() {
+    if (!wantListening || !handsFree || speaking || isThinking) return false;
+    setTimeout(() => {
+        if (wantListening && handsFree && !speaking && !isThinking) startRecognition();
+    }, 300);
+    return true;
 }
 
 function toggleListening() {
     if (!recognition || isThinking) return;
 
     if (listening) {
+        wantListening = false;
         recognition.stop();
         return;
     }
@@ -236,14 +300,27 @@ function toggleListening() {
     // Someone talking to it expects to be answered out loud.
     if (!ttsEnabled) setTtsEnabled(true);
 
+    wantListening = true;
     setResponse("Escuchando...");
-    setListening(true);
-    try {
-        recognition.start();
-    } catch (e) {
-        // Already running; harmless.
-        setListening(true);
+    startRecognition();
+}
+
+function toggleHandsFree() {
+    if (!recognition) return;
+
+    handsFree = !handsFree;
+    recognition.continuous = handsFree;
+
+    if (handsFree) {
+        if (!ttsEnabled) setTtsEnabled(true);
+        wantListening = true;
+        setResponse(`Manos libres: di "${WAKE_WORDS[0]}" y tu pregunta.`);
+        if (!listening) startRecognition();
+    } else {
+        wantListening = false;
+        if (listening) recognition.stop();
     }
+    paintMicState();
 }
 
 async function initCamera() {
@@ -432,6 +509,9 @@ async function handleAnalyze() {
     } finally {
         setBusy(false);
         scheduleIdle();
+        // With nothing left to say, hands-free mode goes back to listening. If
+        // the answer is still being spoken, the utterance's end handler does it.
+        if (!speaking) maybeResumeListening();
     }
 }
 
@@ -443,7 +523,7 @@ function scheduleIdle() {
 }
 
 function runAttractor() {
-    if (!serverReady || isThinking) {
+    if (!serverReady || isThinking || listening || speaking) {
         scheduleIdle();
         return;
     }
@@ -511,10 +591,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     autoBadge = document.getElementById("autoBadge");
     timingBox = document.getElementById("timing");
     micButton = document.getElementById("micButton");
+    handsFreeButton = document.getElementById("handsFreeButton");
 
     startButton.addEventListener("click", handleAnalyze);
     speakToggle.addEventListener("click", () => setTtsEnabled(!ttsEnabled));
     micButton.addEventListener("click", toggleListening);
+    handsFreeButton.addEventListener("click", toggleHandsFree);
 
     // Any sign of a human postpones the attractor.
     document.addEventListener("pointerdown", noteInteraction);
