@@ -238,3 +238,70 @@ textarea:focus {
 ::-webkit-scrollbar {
   display: none;
 }
+/* --- Preguntas rápidas (chips) --- */
+/* Sized for fingers, not cursors: at a stand people tap these instead of
+   typing, so they are the main control. */
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--accent-gradient);
+  border-color: #608f89;
+  transform: translateY(-1px);
+}
+
+.chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- Fila de botones --- */
+.button-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.button-row #startButton {
+  flex: 1;
+}
+
+#speakToggle {
+  font-size: 20px;
+  width: 58px;
+  border-radius: 14px;
+  cursor: pointer;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
+}
+
+#speakToggle.active {
+  background: var(--accent-gradient);
+  border-color: #608f89;
+}
+
+#speakToggle:hover {
+  filter: brightness(1.15);
+}
+
+button:disabled {
+  filter: grayscale(0.6);
+}

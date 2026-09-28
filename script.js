@@ -1,7 +1,7 @@
 // --- CONFIGURACIÓN ---
 // The model no longer runs in the browser. It runs on the T4 box under vLLM,
 // which exposes an OpenAI-compatible endpoint. Point this at the SSH tunnel
-// (ssh -L 8000:localhost:8000 user@t4-box) so the browser only ever talks to
+// (ssh -L 8000:localhost:<port> user@eisi) so the browser only ever talks to
 // localhost: no CORS, no exposed port.
 const API_BASE = "http://localhost:8000/v1";
 const MODEL_ID = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ";
@@ -11,10 +11,22 @@ const MODEL_ID = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ";
 // it leaves the browser cuts prefill time more than anything else here.
 const MAX_SIDE = 768;
 const JPEG_QUALITY = 0.8;
+
 // Room to finish a sentence. Decoding is token-by-token, so this is a direct
 // latency budget: at ~10 tok/s every 10 extra tokens costs about a second. The
 // prompt asks for two sentences, so this is headroom, not a target.
 const MAX_TOKENS = 128;
+
+// Nobody at a stand types on a stranger's laptop, so these carry the demo. The
+// last one shows off OCR, which is where a 32B model most obviously beats a
+// small one.
+const PRESETS = [
+    ["👤", "¿Qué llevo puesto?"],
+    ["🔢", "¿Cuántas personas hay?"],
+    ["🔍", "¿Qué objeto tengo en la mano?"],
+    ["📖", "Lee el texto que aparece en la imagen."],
+    ["🖼️", "Describe la escena."],
+];
 
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
@@ -29,7 +41,7 @@ let isThinking = false;
 let serverReady = false;
 
 // DOM references
-let instructionText, responseText, startButton, loadingOverlay;
+let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
 
 function setResponse(text) {
     if (responseText) {
@@ -44,6 +56,59 @@ function setLoadingVisible(visible) {
     }
 }
 
+// --- VOZ ---
+// Reading the answer out loud carries a noisy stand better than text does. It
+// speaks sentence by sentence as they stream in, so the audio starts while the
+// model is still writing instead of after it finishes.
+let ttsEnabled = false;
+let spokenUpTo = 0;
+let spanishVoice = null;
+
+function pickVoice() {
+    const voices = speechSynthesis.getVoices();
+    spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith("es")) || null;
+}
+
+function resetSpeech() {
+    spokenUpTo = 0;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function flushSpeech(fullText, finished) {
+    if (!ttsEnabled || !("speechSynthesis" in window)) return;
+
+    let pending = fullText.slice(spokenUpTo);
+    if (!finished) {
+        // Only speak up to the last completed sentence, so the voice never
+        // stops mid-clause waiting for the next token.
+        const match = pending.match(/^[\s\S]*[.!?…](?=\s|$)/);
+        if (!match) return;
+        pending = match[0];
+    }
+    spokenUpTo += pending.length;
+
+    const text = pending.trim();
+    if (!text) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "es-ES";
+    if (spanishVoice) utterance.voice = spanishVoice;
+    speechSynthesis.speak(utterance);
+}
+
+function setTtsEnabled(on) {
+    ttsEnabled = on;
+    speakToggle.classList.toggle("active", on);
+    speakToggle.textContent = on ? "🔊" : "🔇";
+    if (!on) resetSpeech();
+    try {
+        localStorage.setItem("tts", on ? "1" : "0");
+    } catch (e) {
+        // Private windows and blocked site data throw here; the toggle still
+        // works for this session.
+    }
+}
+
 async function initCamera() {
     video = document.getElementById("videoFeed");
     try {
@@ -51,7 +116,7 @@ async function initCamera() {
         video.srcObject = stream;
         await video.play();
     } catch (err) {
-        setResponse("Could not connect to camera.");
+        setResponse("No se pudo acceder a la cámara.");
     }
 }
 
@@ -59,7 +124,7 @@ async function initCamera() {
 // confirm the vLLM endpoint is up and serving the model we expect.
 async function initModel() {
     setLoadingVisible(true);
-    setResponse("Connecting to the vLLM server...");
+    setResponse("Conectando con el servidor...");
 
     try {
         const res = await fetch(`${API_BASE}/models`);
@@ -68,20 +133,19 @@ async function initModel() {
         const served = (await res.json()).data.map(m => m.id);
         if (!served.includes(MODEL_ID)) {
             setResponse(
-                `⚠️ Server is up but serving: ${served.join(", ")}\n` +
-                `Set MODEL_ID in script.js to one of those.`
+                `⚠️ El servidor responde, pero sirve: ${served.join(", ")}\n` +
+                `Ajusta MODEL_ID en script.js.`
             );
         } else {
-            setResponse("✅ Ready! Press 'Analyze' to start.");
+            setResponse("✅ ¡Listo! Elige una pregunta o pulsa Analizar.");
         }
 
         serverReady = true;
-        startButton.textContent = "Analyze";
+        startButton.textContent = "Analizar";
     } catch (err) {
         setResponse(
-            `❌ Cannot reach ${API_BASE} (${err.message}).\n` +
-            `Start vLLM on the T4 box, then open the tunnel:\n` +
-            `ssh -L 8000:localhost:8000 user@t4-box`
+            `❌ No se puede conectar con ${API_BASE} (${err.message}).\n` +
+            `Comprueba que el túnel SSH sigue abierto.`
         );
     } finally {
         setLoadingVisible(false);
@@ -102,33 +166,39 @@ function captureImage() {
     return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
 }
 
+function setBusy(busy) {
+    isThinking = busy;
+    startButton.disabled = busy;
+    presetsBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
+
+    if (busy) {
+        // Injects a self-animating SVG spinner along with the text
+        startButton.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56">
+                    <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
+                </path>
+            </svg>
+            Analizando...
+        `;
+    } else {
+        startButton.textContent = "Analizar";
+    }
+}
+
 // --- TRIGGERED INFERENCE ---
 async function handleAnalyze() {
     if (!serverReady || isThinking) return;
 
-    isThinking = true;
-    startButton.disabled = true;
-
-    // Injects a self-animating SVG spinner along with the text
-    startButton.innerHTML = `
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56">
-                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
-            </path>
-        </svg>
-        Analyzing...
-    `;
-
-    // This clears the answer section immediately when the button is pressed
+    setBusy(true);
     setResponse("");
+    resetSpeech();
 
     const instruction = instructionText.value || "¿Qué ves?";
     const dataUrl = captureImage();
 
     if (!dataUrl) {
-        isThinking = false;
-        startButton.disabled = false;
-        startButton.textContent = "Analyze"; // Reset to standard text
+        setBusy(false);
         return;
     }
 
@@ -151,6 +221,9 @@ async function handleAnalyze() {
     ];
 
     const started = performance.now();
+    let ttft = null;
+    let answer = "";
+    let tokens = 0;
 
     try {
         const res = await fetch(`${API_BASE}/chat/completions`, {
@@ -161,29 +234,79 @@ async function handleAnalyze() {
                 messages,
                 max_tokens: MAX_TOKENS,
                 temperature: 0,
+                // Streaming is what makes a multi-second answer feel fast: the
+                // first words land in about a second and the rest reads as
+                // typing rather than waiting.
+                stream: true,
+                stream_options: { include_usage: true },
             })
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
 
-        const body = await res.json();
-        const elapsed = ((performance.now() - started) / 1000).toFixed(1);
-        const tokens = body.usage?.completion_tokens ?? "?";
-        console.log(`[timing] ${elapsed}s for ${tokens} tokens @ ${canvas.width}x${canvas.height}`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        setResponse(`${body.choices[0].message.content.trim()}\n\n(${elapsed}s)`);
+        // Server-sent events arrive as "data: {...}" lines, and a chunk can
+        // split mid-line, so the tail stays in the buffer until completed.
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                const payload = line.slice(6).trim();
+                if (!payload || payload === "[DONE]") continue;
+
+                const chunk = JSON.parse(payload);
+                if (chunk.usage) tokens = chunk.usage.completion_tokens;
+
+                const piece = chunk.choices?.[0]?.delta?.content;
+                if (piece) {
+                    if (ttft === null) ttft = (performance.now() - started) / 1000;
+                    answer += piece;
+                    setResponse(answer);
+                    flushSpeech(answer, false);
+                }
+            }
+        }
+
+        flushSpeech(answer, true);
+
+        const elapsed = (performance.now() - started) / 1000;
+        console.log(
+            `[timing] ${elapsed.toFixed(1)}s total, first token ${ttft?.toFixed(1)}s, ` +
+            `${tokens} tokens @ ${canvas.width}x${canvas.height}`
+        );
+        setResponse(`${answer.trim()}\n\n(${elapsed.toFixed(1)}s · primera palabra ${ttft?.toFixed(1)}s)`);
 
     } catch (e) {
         setResponse(`Error: ${e.message}`);
     } finally {
-        isThinking = false;
-        startButton.disabled = false;
-        // Reset to just "Analyze" when finished, which removes the SVG
-        startButton.textContent = "Analyze";
+        setBusy(false);
     }
 }
 
 // --- UI y Draggable ---
+function renderPresets() {
+    for (const [icon, question] of PRESETS) {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.textContent = `${icon} ${question}`;
+        chip.addEventListener("click", () => {
+            instructionText.value = question;
+            autoResizeTextarea(instructionText);
+            handleAnalyze();
+        });
+        presetsBox.appendChild(chip);
+    }
+}
+
 function makeDraggable(el) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
     el.addEventListener('mousedown', dragStart);
@@ -206,8 +329,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     startButton = document.getElementById("startButton");
     loadingOverlay = document.getElementById("loadingOverlay");
     canvas = document.getElementById("canvas");
+    presetsBox = document.getElementById("presets");
+    speakToggle = document.getElementById("speakToggle");
 
     startButton.addEventListener("click", handleAnalyze);
+    speakToggle.addEventListener("click", () => setTtsEnabled(!ttsEnabled));
 
     // Enter sends the instruction; Shift+Enter still inserts a newline, since
     // this is a textarea. handleAnalyze already ignores presses while a request
@@ -218,6 +344,21 @@ window.addEventListener("DOMContentLoaded", async () => {
             handleAnalyze();
         }
     });
+
+    renderPresets();
+
+    if ("speechSynthesis" in window) {
+        pickVoice();
+        // The voice list is often empty on first call and fills in later.
+        speechSynthesis.addEventListener("voiceschanged", pickVoice);
+        let remembered = "0";
+        try {
+            remembered = localStorage.getItem("tts") ?? "0";
+        } catch (e) { /* see setTtsEnabled */ }
+        setTtsEnabled(remembered === "1");
+    } else {
+        speakToggle.style.display = "none";
+    }
 
     const ioAreas = document.querySelector('.io-areas');
     if (ioAreas) makeDraggable(ioAreas);

@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 
 <head>
   <script>window.huggingface = { variables: { "SPACE_CREATOR_USER_ID": "61b253b7ac5ecaae3d1efe0c" } };</script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Camera Interaction App</title>
+  <title>Asistente Visual</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -21,15 +21,20 @@
 
   <div class="io-areas">
     <div>
-      <label for="instructionText">Instruction:</label><br />
+      <label>Preguntas rápidas:</label>
+      <div id="presets" class="presets"></div>
+    </div>
+    <div>
+      <label for="instructionText">Instrucción:</label><br />
       <textarea id="instructionText" style="height: 2em; width: 100%" name="Instruction"></textarea>
     </div>
     <div>
-      <label for="responseText">Response:</label><br />
+      <label for="responseText">Respuesta:</label><br />
       <textarea id="responseText" style="height: 2em; width: 100%" name="Response" readonly></textarea>
     </div>
-    <div style="display: flex; justify-content: center;">
-      <button id="startButton" class="start">Start</button>
+    <div class="button-row">
+      <button id="startButton" class="start">Analizar</button>
+      <button id="speakToggle" title="Leer la respuesta en voz alta">🔊</button>
     </div>
   </div>
   <script type="module" src="script.js"></script>
