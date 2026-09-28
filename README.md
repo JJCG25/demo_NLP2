@@ -7,10 +7,11 @@ The browser holds the camera and the UI. The model runs on the GPU box and is
 reached over an SSH tunnel, so the page only ever talks to `localhost`.
 
 ```
-laptop                              T4 box
-------                              ------
-camera + UI  --- ssh tunnel --->    vLLM (4x T4, TP=4)
-                :8000               Qwen2.5-VL-32B-AWQ
+laptop            login node         compute node (Slurm job)
+------            ----------         -----------------------
+camera + UI  -->  ssh hop      -->   vLLM, 4x T4, TP=4
+   :8000                             Qwen2.5-VL-32B-AWQ
+         \_______ ssh -L tunnel _______/
 ```
 
 ## ✨ Features
@@ -23,26 +24,38 @@ camera + UI  --- ssh tunnel --->    vLLM (4x T4, TP=4)
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-- **GPU box**: 4x T4 (64 GB total) running Linux, with `pip install vllm`.
-  vLLM has no native Windows build; on Windows use WSL2 or Docker.
+- **Cluster access**: a Slurm cluster with a 4x T4 node, and space on `/disk`
+  (~25 GB for the weights and the venv).
 - **Laptop**: any modern browser and a webcam. No WebGPU needed any more.
-- **SSH access** from the laptop to the GPU box.
 
-### 2. Start the model (on the T4 box)
+### 2. One-time setup (on the login node)
 ```bash
-./run_vllm.sh
+bash cluster/setup_env.sh
 ```
-First start downloads ~20 GB of int4 weights. Wait for `Application startup complete`.
-See the comments in [run_vllm.sh](run_vllm.sh) for the T4-specific flags and what
-to do about OOM.
+Creates the venv, installs vLLM and pre-downloads the ~20 GB of weights, all
+under `/disk/$USER`. The download happens here because compute nodes often have
+no internet access. Edit `DISK_ROOT` at the top if your space is elsewhere.
 
-### 3. Open the tunnel (on the laptop)
+### 3. Start the server (from the login node)
 ```bash
-ssh -L 8000:localhost:8000 user@t4-box
+sbatch cluster/vllm.sbatch
+tail -f vllm-<jobid>.out
 ```
-Leave it running. This is why no CORS setup or exposed port is needed.
+The job takes all 4 GPUs. Its log prints the exact tunnel command, with the
+compute node and port already filled in — copy it from there.
 
-### 4. Serve the page (on the laptop)
+Note the **4-hour time limit** in the script: the server dies when the job ends,
+and you resubmit. The weights are cached on `/disk`, so later starts only pay
+the load time, not the download.
+
+### 4. Open the tunnel (on the laptop)
+```bash
+ssh -L 8000:<compute-node>:<port> user@login-host    # see the job log
+```
+Leave it running. Two hops in one command: your laptop reaches the login node,
+which reaches the compute node. This is why no CORS setup or exposed port is needed.
+
+### 5. Serve the page (on the laptop)
 ```bash
 python serve.py 8080
 ```
@@ -62,16 +75,24 @@ impact:
 
 | Knob | Where | Effect |
 |---|---|---|
-| `MAX_SIDE` | [script.js](script.js) | Frame resolution. Fewer pixels, fewer vision tokens, faster prefill. Keep `max_pixels` in `run_vllm.sh` in sync. |
+| `MAX_SIDE` | [script.js](script.js) | Frame resolution. Fewer pixels, fewer vision tokens, faster prefill. Keep `max_pixels` in the sbatch in sync. |
 | `MAX_TOKENS` | [script.js](script.js) | Caps answer length. Decoding is token-by-token, so this scales latency directly. |
-| `--tensor-parallel-size` | [run_vllm.sh](run_vllm.sh) | 4 spreads compute but costs PCIe traffic (no NVLink on T4). Measure 2 against 4. |
+| `--tensor-parallel-size` | [cluster/vllm.sbatch](cluster/vllm.sbatch) | 4 spreads compute but costs PCIe traffic (no NVLink on T4). Measure 2 against 4. |
 
 If it's still too slow, `Qwen/Qwen2.5-VL-7B-Instruct` in fp16 fits on a single
-T4 and is several times faster. Only `MODEL_ID` and the `vllm serve` argument change.
+T4 and is several times faster. Change `MODEL_ID` in [script.js](script.js), and
+`MODEL` plus `--gres=gpu:1` and `--tensor-parallel-size 1` in the sbatch.
+
+To experiment without queueing a batch job each time, grab an interactive
+allocation and run the same `vllm serve` command by hand:
+```bash
+salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
+```
 
 ## 📝 Technical Notes
 - **Model**: [`Qwen/Qwen2.5-VL-32B-Instruct-AWQ`](https://huggingface.co/Qwen/Qwen2.5-VL-32B-Instruct-AWQ) (int4, ~20 GB)
-- **Engine**: vLLM, OpenAI-compatible `/v1/chat/completions`
+- **Engine**: vLLM, OpenAI-compatible `/v1/chat/completions`, inside a Slurm job
+- **Storage**: venv, HF cache and compile caches all under `/disk/$USER`, never `$HOME`
 - **Precision**: `float16`, required — T4 (sm75) has no bfloat16 support
 - **Why not Qwen3-VL**: it has [no vLLM backend for Turing GPUs](https://github.com/vllm-project/vllm/issues/29743)
 - **`serve.py`**: the COOP/COEP headers it sends are harmless leftovers from the
