@@ -1,18 +1,17 @@
-import {
-    AutoProcessor,
-    AutoModelForImageTextToText,
-    RawImage,
-    env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/transformers.min.js";
+// --- CONFIGURACIÓN ---
+// The model no longer runs in the browser. It runs on the T4 box under vLLM,
+// which exposes an OpenAI-compatible endpoint. Point this at the SSH tunnel
+// (ssh -L 8000:localhost:8000 user@t4-box) so the browser only ever talks to
+// localhost: no CORS, no exposed port.
+const API_BASE = "http://localhost:8000/v1";
+const MODEL_ID = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ";
 
-// --- CONFIGURACIÓN DE ENTORNO (OPTIMIZADO PARA CPU) ---
-// Load straight from the HuggingFace Hub. There is no local ./models/ copy,
-// so leaving this on just produced a failed 404 round-trip per file.
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-// Habilitar multi-hilo 
-env.backends.onnx.wasm.numThreads = navigator.hardwareConcurrency || 4;
+// Latency knobs. MAX_SIDE is the strongest one by far: every pixel becomes
+// vision tokens the T4s have to chew through, so downscaling the frame before
+// it leaves the browser cuts prefill time more than anything else here.
+const MAX_SIDE = 768;
+const JPEG_QUALITY = 0.8;
+const MAX_TOKENS = 64;
 
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
@@ -22,8 +21,9 @@ function autoResizeTextarea(el) {
 }
 
 // VARIABLES GLOBALES
-let video, canvas, processor, model, stream;
+let video, canvas, stream;
 let isThinking = false;
+let serverReady = false;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay;
@@ -52,50 +52,60 @@ async function initCamera() {
     }
 }
 
+// Replaces the old WebGPU model load: nothing downloads here any more, we just
+// confirm the vLLM endpoint is up and serving the model we expect.
 async function initModel() {
-    const modelId = "onnx-community/FastVLM-0.5B-ONNX";
     setLoadingVisible(true);
-    setResponse("Loading model (WebGPU)...");
+    setResponse("Connecting to the vLLM server...");
 
     try {
-        processor = await AutoProcessor.from_pretrained(modelId);
+        const res = await fetch(`${API_BASE}/models`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        model = await AutoModelForImageTextToText.from_pretrained(modelId, {
-            device: "webgpu",
-            dtype: {
-                embed_tokens: "fp16",
-                vision_encoder: "q4",
-                decoder_model_merged: "q4",
-            }
-        });
+        const served = (await res.json()).data.map(m => m.id);
+        if (!served.includes(MODEL_ID)) {
+            setResponse(
+                `⚠️ Server is up but serving: ${served.join(", ")}\n` +
+                `Set MODEL_ID in script.js to one of those.`
+            );
+        } else {
+            setResponse("✅ Ready! Press 'Analyze' to start.");
+        }
 
-        // Changed text to just "Analyze"
-        setResponse("✅ Ready! Press 'Analyze' to start.");
+        serverReady = true;
         startButton.textContent = "Analyze";
     } catch (err) {
-        setResponse(`❌ Error loading: ${err.message}`);
+        setResponse(
+            `❌ Cannot reach ${API_BASE} (${err.message}).\n` +
+            `Start vLLM on the T4 box, then open the tunnel:\n` +
+            `ssh -L 8000:localhost:8000 user@t4-box`
+        );
     } finally {
         setLoadingVisible(false);
     }
 }
 
+// Downscales to MAX_SIDE on the way out and returns a JPEG data URL, which is
+// the format the OpenAI image_url field takes.
 function captureImage() {
     if (!stream || !video || !video.videoWidth) return null;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+
+    const scale = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-    return new RawImage(frame.data, frame.width, frame.height, 4);
+    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
 }
 
 // --- TRIGGERED INFERENCE ---
 async function handleAnalyze() {
-    if (!model || isThinking) return;
+    if (!serverReady || isThinking) return;
 
     isThinking = true;
     startButton.disabled = true;
-    
+
     // Injects a self-animating SVG spinner along with the text
     startButton.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;">
@@ -105,62 +115,59 @@ async function handleAnalyze() {
         </svg>
         Analyzing...
     `;
-    
-    // This clears the answer section immediately when the button is pressed
-    setResponse(""); 
 
-    const instruction = instructionText.value || "What do you see?";
-    const rawImg = captureImage();
-    
-    if (!rawImg) {
+    // This clears the answer section immediately when the button is pressed
+    setResponse("");
+
+    const instruction = instructionText.value || "¿Qué ves?";
+    const dataUrl = captureImage();
+
+    if (!dataUrl) {
         isThinking = false;
         startButton.disabled = false;
         startButton.textContent = "Analyze"; // Reset to standard text
         return;
     }
 
-    try {
-        const messages = [
-            { 
-                role: "system", 
-                content: "You are an expert visual analysis assistant. " + 
-                        "CRITICAL RULE: Respond ONLY in English. Be extremely concise, direct, and avoid any conversational filler." 
-            },
-            { 
-                role: "user", 
-                content: "<image>Instruction: Describe this image." 
-            },
-            { 
-                role: "assistant", 
-                content: "An office environment with several people working on computers." 
-            },
-            { 
-                role: "user", 
-                content: `Instruction: ${instruction}. Respond only in English and keep it brief.` 
-            },
-            { 
-                role: "assistant", 
-                content: "Description:" 
-            }
-        ];
-        
-        const prompt = processor.apply_chat_template(messages, { add_generation_prompt: true });
-        const inputs = await processor(rawImg, prompt);
+    // A 32B model follows the instruction on its own, so the few-shot example
+    // and the "Descripción:" primer the 0.5B needed are gone.
+    const messages = [
+        {
+            role: "system",
+            content: "Eres un asistente experto en análisis visual. " +
+                     "Responde SIEMPRE en español, de forma concisa y directa, sin relleno conversacional."
+        },
+        {
+            role: "user",
+            content: [
+                { type: "image_url", image_url: { url: dataUrl } },
+                { type: "text", text: instruction }
+            ]
+        }
+    ];
 
-        const outputs = await model.generate({
-            ...inputs,
-            max_new_tokens: 64, 
-            do_sample: false, 
-            temperature: 0.0,
-            repetition_penalty: 1.2,
+    const started = performance.now();
+
+    try {
+        const res = await fetch(`${API_BASE}/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: MODEL_ID,
+                messages,
+                max_tokens: MAX_TOKENS,
+                temperature: 0,
+            })
         });
 
-        const decoded = processor.batch_decode(
-            outputs.slice(null, [inputs.input_ids.dims.at(-1), null]),
-            { skip_special_tokens: true }
-        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
 
-        setResponse(decoded[0].trim());
+        const body = await res.json();
+        const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+        const tokens = body.usage?.completion_tokens ?? "?";
+        console.log(`[timing] ${elapsed}s for ${tokens} tokens @ ${canvas.width}x${canvas.height}`);
+
+        setResponse(`${body.choices[0].message.content.trim()}\n\n(${elapsed}s)`);
 
     } catch (e) {
         setResponse(`Error: ${e.message}`);
