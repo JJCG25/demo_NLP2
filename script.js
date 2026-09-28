@@ -90,6 +90,13 @@ const WAKE_WORDS = ["oye", "asistente", "hola"];
 // "local"   -> Whisper on the workstation CPUs. Nothing leaves the machine, and
 //              it needs the second tunnel (-L 8100:<node>:<stt port>).
 // "browser" -> Chrome's SpeechRecognition, which streams the audio to Google.
+// Both off after testing at the stand: continuous listening kept triggering on
+// room noise and re-asking the same question, and reading answers aloud fights
+// with the microphone. Push to talk plus text is what held up. Flip either back
+// on and its button reappears.
+const ENABLE_HANDS_FREE = false;
+const ENABLE_TTS = false;
+
 const STT_BACKEND = "local";
 const STT_URL = "http://localhost:8100/transcribe";
 
@@ -181,7 +188,7 @@ function resetSpeech() {
 }
 
 function flushSpeech(fullText, finished) {
-    if (!ttsEnabled || !("speechSynthesis" in window)) return;
+    if (!ENABLE_TTS || !ttsEnabled) return;
 
     let pending = fullText.slice(spokenUpTo);
     if (!finished) {
@@ -288,6 +295,7 @@ function stopLocalSpeech() {
 }
 
 function setTtsEnabled(on) {
+    if (!ENABLE_TTS) on = false;
     ttsEnabled = on;
     speakToggle.classList.toggle("active", on);
     speakToggle.textContent = on ? "🔊" : "🔇";
@@ -602,9 +610,10 @@ function initSpeech() {
         : (window.MediaRecorder && navigator.mediaDevices);
 
     if (!ok) {
-        micButton.style.display = "none";
-        handsFreeButton.style.display = "none";
+        micButton.classList.add("hidden");
     }
+    if (ENABLE_HANDS_FREE && ok) handsFreeButton.classList.remove("hidden");
+    if (ENABLE_TTS) speakToggle.classList.remove("hidden");
 }
 
 // A stand runs unattended for hours, so rather than trusting every path to
@@ -652,9 +661,6 @@ async function toggleListening() {
     // Never listen while the demo is talking, or the mic transcribes its own
     // answer straight back.
     resetSpeech();
-    // Someone talking to it expects to be answered out loud.
-    if (!ttsEnabled) setTtsEnabled(true);
-
     wantListening = true;
     setResponse("Escuchando...");
 
@@ -667,6 +673,7 @@ async function toggleListening() {
 }
 
 async function toggleHandsFree() {
+    if (!ENABLE_HANDS_FREE) return;
     handsFree = !handsFree;
     if (recognition) recognition.continuous = handsFree;
 
@@ -1031,7 +1038,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     renderPresets();
     initSpeech();
 
-    if ("speechSynthesis" in window) {
+    if (ENABLE_TTS && "speechSynthesis" in window) {
         pickVoice();
         // The voice list is often empty on first call and fills in later.
         speechSynthesis.addEventListener("voiceschanged", pickVoice);

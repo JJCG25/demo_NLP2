@@ -18,6 +18,7 @@ camera + UI  -->  ssh hop      -->   vLLM, 4x T4, TP=4
 - **Immersive UI**: Full-screen camera feed with a modern glassmorphism control panel.
 - **Draggable Controls**: Move the interaction panel anywhere on your screen.
 - **Spanish answers**: The system prompt pins the response language.
+- **Voice input**: press the mic, speak, and the question is transcribed locally.
 - **Timing readout**: Each answer reports its latency, and the console logs
   tokens and frame size so you can tune.
 
@@ -135,10 +136,11 @@ salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
 ## 📝 Technical Notes
 - **Model**: [`Qwen/Qwen2.5-VL-32B-Instruct-AWQ`](https://huggingface.co/Qwen/Qwen2.5-VL-32B-Instruct-AWQ) (int4, ~20 GB)
 - **Engine**: vLLM, OpenAI-compatible `/v1/chat/completions`, inside a Slurm job
-- **Speech in**: Whisper `small` (int8) on the CPUs via faster-whisper, in the
+- **Speech in**: push-to-talk only; continuous listening is off by default
+  (`ENABLE_HANDS_FREE`), because it kept triggering on room noise. Whisper `small` (int8) on the CPUs via faster-whisper, in the
   same job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
   `script.js` to use Chrome's recogniser instead, which streams it to Google
-- **Speech out**: Piper (`es_MX-ald-medium`, neutral Latin American) on the same
+- **Speech out**: off by default (`ENABLE_TTS` in `script.js`). Piper (`es_MX-ald-medium`, neutral Latin American) on the same
   CPUs, loaded once and served as WAV from `/speak`. `TTS_VOICE_NAME` picks
   another of the downloaded voices; Piper has no Colombian voice, so es_MX is the
   closest fit. A laptop's system voices sound robotic and the good-sounding
