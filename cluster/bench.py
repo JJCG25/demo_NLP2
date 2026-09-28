@@ -123,6 +123,28 @@ def bench_one_size(url, model, side, prompt, max_tokens, runs):
     return med_total
 
 
+def wait_for_server(base, timeout):
+    """The server needs minutes to load 20GB across four cards, so a bare
+    'connection refused' traceback is almost always just impatience."""
+    deadline = time.time() + timeout
+    announced = False
+    while time.time() < deadline:
+        try:
+            if requests.get(f"{base}/health", timeout=5).ok:
+                if announced:
+                    print(" ready")
+                return True
+        except requests.RequestException:
+            pass
+        if not announced:
+            print(f"waiting for {base} (still loading weights)", end="", flush=True)
+            announced = True
+        print(".", end="", flush=True)
+        time.sleep(5)
+    print()
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="localhost")
@@ -134,9 +156,20 @@ def main():
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--sweep", default="768",
                     help="comma-separated frame sizes, e.g. 512,768,1024")
+    ap.add_argument("--wait", type=int, default=600, metavar="SECONDS",
+                    help="poll until the server is up (0 to fail immediately)")
     args = ap.parse_args()
 
-    url = f"http://{args.host}:{args.port}/v1/chat/completions"
+    base = f"http://{args.host}:{args.port}/v1"
+    if not wait_for_server(base, args.wait):
+        raise SystemExit(
+            f"\nNothing listening on {args.host}:{args.port} after {args.wait}s.\n"
+            f"  squeue -u $USER        is the job actually running?\n"
+            f"  tail vllm-<jobid>.out  did it reach 'Application startup complete'?\n"
+            f"  the sbatch derives the port as 8000 + jobid %% 1000"
+        )
+
+    url = f"{base}/chat/completions"
     print(f"target : {url}")
     print(f"model  : {args.model}")
     print(f"budget : {args.max_tokens} max tokens")
