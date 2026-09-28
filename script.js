@@ -44,10 +44,11 @@ let serverReady = false;
 let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
 
 function setResponse(text) {
-    if (responseText) {
-        responseText.value = text;
-        autoResizeTextarea(responseText);
-    }
+    if (!responseText) return;
+    responseText.value = text;
+    // The box has a fixed region in the panel now, so instead of growing it we
+    // follow the text as it streams in.
+    responseText.scrollTop = responseText.scrollHeight;
 }
 
 function setLoadingVisible(visible) {
@@ -307,22 +308,6 @@ function renderPresets() {
     }
 }
 
-function makeDraggable(el) {
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    el.addEventListener('mousedown', dragStart);
-    function dragStart(e) {
-        if (['TEXTAREA', 'BUTTON'].includes(e.target.tagName)) return;
-        pos3 = e.clientX; pos4 = e.clientY;
-        document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
-        document.onmousemove = (e) => {
-            pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
-            pos3 = e.clientX; pos4 = e.clientY;
-            el.style.top = (el.offsetTop - pos2) + "px";
-            el.style.left = (el.offsetLeft - pos1) + "px";
-        };
-    }
-}
-
 window.addEventListener("DOMContentLoaded", async () => {
     instructionText = document.getElementById("instructionText");
     responseText = document.getElementById("responseText");
@@ -359,9 +344,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     } else {
         speakToggle.style.display = "none";
     }
-
-    const ioAreas = document.querySelector('.io-areas');
-    if (ioAreas) makeDraggable(ioAreas);
 
     await initCamera();
     await initModel();

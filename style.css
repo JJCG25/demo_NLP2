@@ -27,14 +27,19 @@ body {
   background-color: #000;
 }
 
-/* --- Full Screen Camera Background --- */
-#videoContainer {
-  position: fixed;
-  top: 0;
-  left: 0;
+/* --- Layout: camera left, fixed control panel right --- */
+/* Swap the order here (row-reverse) to put the panel on the left. */
+.app {
+  display: flex;
+  flex-direction: row;
   width: 100vw;
   height: 100vh;
-  z-index: 1;
+}
+
+#videoContainer {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   /* Lowest layer */
   background-color: #000;
 }
@@ -94,47 +99,36 @@ body {
   }
 }
 
-/* --- Overlays (Floating Controls) --- */
+/* --- Panel de control fijo --- */
+/* Full height on one side rather than a floating card: it never covers the
+   faces in frame, and the answer can grow downwards without hiding video. */
 .io-areas {
-  position: fixed;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  /* Initial center position */
-  width: 90%;
-  max-width: 560px;
+  flex: 0 0 420px;
+  height: 100vh;
+  overflow-y: auto;
   z-index: 100;
   background: var(--overlay-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  padding: 24px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 28px 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  transition: background 0.3s ease, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  cursor: grab;
-  user-select: none;
-  /* Prevent text selection while dragging */
+  gap: 22px;
 }
 
-/* Drag handle hint at the top of the panel */
-.io-areas::before {
-  content: '';
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 40px;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 2px;
+/* The answer takes the slack, so short answers sit at the top and long ones
+   have room before the panel scrolls. */
+.response-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.io-areas:hover {
-  background: var(--overlay-bg-hover);
+.response-block textarea {
+  flex: 1;
 }
 
 label {
@@ -304,4 +298,19 @@ textarea:focus {
 
 button:disabled {
   filter: grayscale(0.6);
+}
+
+/* --- Pantallas estrechas: panel abajo en vez de al lado --- */
+@media (max-width: 900px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .io-areas {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: 55vh;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
 }

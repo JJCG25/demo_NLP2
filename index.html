@@ -11,32 +11,34 @@
 </head>
 
 <body>
+  <div class="app">
+    <div id="videoContainer">
+      <video id="videoFeed" autoplay playsinline></video>
+      <div id="loadingOverlay">Loading...</div>
+    </div>
 
+    <canvas id="canvas" class="hidden"></canvas>
 
-  <div id="videoContainer">
-    <video id="videoFeed" autoplay playsinline></video>
-    <div id="loadingOverlay">Loading...</div>
+    <aside class="io-areas">
+      <div>
+        <label>Preguntas rápidas:</label>
+        <div id="presets" class="presets"></div>
+      </div>
+      <div>
+        <label for="instructionText">Instrucción:</label>
+        <textarea id="instructionText" name="Instruction"></textarea>
+      </div>
+      <div class="response-block">
+        <label for="responseText">Respuesta:</label>
+        <textarea id="responseText" name="Response" readonly></textarea>
+      </div>
+      <div class="button-row">
+        <button id="startButton" class="start">Analizar</button>
+        <button id="speakToggle" title="Leer la respuesta en voz alta">🔊</button>
+      </div>
+    </aside>
   </div>
-  <canvas id="canvas" class="hidden"></canvas>
 
-  <div class="io-areas">
-    <div>
-      <label>Preguntas rápidas:</label>
-      <div id="presets" class="presets"></div>
-    </div>
-    <div>
-      <label for="instructionText">Instrucción:</label><br />
-      <textarea id="instructionText" style="height: 2em; width: 100%" name="Instruction"></textarea>
-    </div>
-    <div>
-      <label for="responseText">Respuesta:</label><br />
-      <textarea id="responseText" style="height: 2em; width: 100%" name="Response" readonly></textarea>
-    </div>
-    <div class="button-row">
-      <button id="startButton" class="start">Analizar</button>
-      <button id="speakToggle" title="Leer la respuesta en voz alta">🔊</button>
-    </div>
-  </div>
   <script type="module" src="script.js"></script>
 </body>
 
