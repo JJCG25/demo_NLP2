@@ -47,9 +47,11 @@ tail -f vllm-<jobid>.out
 The job takes all 4 GPUs. Its log prints the exact tunnel command, with the
 compute node and port already filled in — copy it from there.
 
-Note the **4-hour time limit** in the script: the server dies when the job ends,
-and you resubmit. The weights are cached on `/disk`, so later starts only pay
-the load time, not the download.
+Note the **12-hour time limit** in the script: the server dies when the job
+ends, and you resubmit. Raise it to cover a whole event (the `main` partition
+has no limit of its own), but do not park a job on all four GPUs longer than you
+need it — the machine is shared. The weights are cached on `/disk`, so later
+starts only pay the load time, not the download.
 
 ### 4. Open the tunnel (on the laptop)
 ```bash
