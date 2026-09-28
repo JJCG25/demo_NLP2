@@ -76,7 +76,12 @@ echo
 # falls back to a slower kernel -- expected, not a misconfiguration.
 #
 # --host 0.0.0.0 is what lets the login node reach this port for the tunnel.
+# --served-model-name matters because of HF_HUB_OFFLINE: vLLM resolves the repo
+# id to the local snapshot path and would otherwise register the model under
+# that path, so requests naming the repo id get a 404. This pins the public name
+# to what script.js and bench.py send.
 srun vllm serve "$MODEL" \
+    --served-model-name "$MODEL" \
     --dtype float16 \
     --tensor-parallel-size 4 \
     --max-model-len 4096 \
