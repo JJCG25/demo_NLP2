@@ -313,10 +313,11 @@ let handsFree = false;      // listen continuously and wait for a wake word
 let speaking = false;       // the demo is talking, so the mic must stay shut
 
 // Local backend state
-let audioStream = null, analyser = null, vadTimer = null;
+let audioStream = null, audioCtx = null, analyser = null, vadTimer = null;
 let recorder = null, chunks = [], recording = false, forcedRecording = false;
 let dropUtterance = false;  // stop the recorder without sending what it captured
 let loudFrames = 0;         // how much of this recording was actually loud
+let peakLevel = 0;          // loudest frame seen, for diagnosing a dead mic
 let silenceSince = 0, recordingSince = 0;
 
 // In hands-free mode everything is ignored until a wake word shows up, so the
@@ -368,11 +369,26 @@ async function ensureMic() {
         setResponse("Permite el acceso al micrófono para hablarle.");
         return false;
     }
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = ctx.createAnalyser();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
     analyser.fftSize = 1024;
-    ctx.createMediaStreamSource(audioStream).connect(analyser);
+    audioCtx.createMediaStreamSource(audioStream).connect(analyser);
+
+    // Created after the getUserMedia await, so the browser no longer counts this
+    // as a user gesture and starts the context suspended. A suspended context
+    // reports silence, which makes every recording look like noise.
+    await resumeAudio();
     return true;
+}
+
+async function resumeAudio() {
+    if (audioCtx && audioCtx.state === "suspended") {
+        try {
+            await audioCtx.resume();
+        } catch (e) {
+            console.warn("[vad] no se pudo reanudar el audio:", e.message);
+        }
+    }
 }
 
 // Loudness of the current frame, 0..1. Cheap enough to run every 50ms and it is
@@ -388,6 +404,7 @@ function micLevel() {
 function startRecording() {
     chunks = [];
     loudFrames = 0;
+    peakLevel = 0;
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus" : "audio/webm";
     recorder = new MediaRecorder(audioStream, { mimeType: mime });
@@ -464,7 +481,9 @@ function vadTick() {
         return;
     }
 
-    const loud = micLevel() > SPEECH_RMS;
+    const level = micLevel();
+    peakLevel = Math.max(peakLevel, level);
+    const loud = level > SPEECH_RMS;
 
     if (!recording) {
         if (loud || forcedRecording) startRecording();
@@ -480,7 +499,12 @@ function vadTick() {
         // A pause this long means they finished the sentence -- unless there was
         // barely any speech in it, in which case a door or a cough set the
         // recorder off and Whisper would just return an empty string.
-        const wasSpeech = loudFrames >= MIN_LOUD_FRAMES;
+        // forcedRecording means someone pressed the mic on purpose, so send it
+        // even if the level meter disagrees: better a bad transcription than a
+        // button that silently does nothing.
+        const wasSpeech = loudFrames >= MIN_LOUD_FRAMES || forcedRecording;
+        console.log(`[vad] loud=${loudFrames} pico=${peakLevel.toFixed(3)} ` +
+                    `audio=${audioCtx ? audioCtx.state : "?"} envío=${wasSpeech}`);
         listening = false;
         clearInterval(vadTimer);
         vadTimer = null;
@@ -496,6 +520,7 @@ function vadTick() {
 }
 
 function startLocalListening(forceRecord) {
+    resumeAudio();
     silenceSince = 0;
     forcedRecording = forceRecord;
     listening = true;
