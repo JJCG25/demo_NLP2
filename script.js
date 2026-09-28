@@ -75,6 +75,10 @@ const IDLE_MS = 30000;
 // slow answer on four T4s is under 20s, so a minute means something broke.
 const BUSY_TIMEOUT_MS = 60000;
 
+// Same idea for the voice: speaking keeps the mic shut, so a stuck flag makes the
+// demo silently deaf.
+const SPEAKING_TIMEOUT_MS = 45000;
+
 // Speech recognition locale. "es-CO", "es-MX" or "es-AR" recognise local accents
 // noticeably better than the Castilian default.
 const SPEECH_LANG = "es-ES";
@@ -198,6 +202,7 @@ function flushSpeech(fullText, finished) {
 // mode transcribes the demo's own answer.
 function beginSpeaking() {
     speaking = true;
+    armSpeakingWatchdog();
     if (STT_BACKEND === "browser") {
         if (recognition && listening) recognition.stop();
     } else if (listening) {
@@ -207,6 +212,7 @@ function beginSpeaking() {
 
 function endSpeaking() {
     speaking = false;
+    clearTimeout(speakingWatchdog);
     maybeResumeListening();
 }
 
@@ -405,6 +411,9 @@ async function sendUtterance() {
     const drop = dropUtterance;
     dropUtterance = false;
     if (drop || isThinking || speaking) {
+        // Clear the status text too: leaving "Transcribiendo..." on screen with
+        // nothing coming is what made this look frozen rather than skipped.
+        if (!isThinking) setResponse("");
         maybeResumeListening();
         return;
     }
@@ -708,6 +717,20 @@ function captureImage() {
 // this gives the busy state a deadline: nothing here legitimately takes a minute,
 // so anything that does is a bug, and at a stand recovering beats being correct.
 let busyWatchdog = null;
+
+// speaking gates the microphone, so if it ever sticks the demo goes deaf with no
+// visible error at all. Nothing legitimately speaks for this long.
+let speakingWatchdog = null;
+
+function armSpeakingWatchdog() {
+    clearTimeout(speakingWatchdog);
+    speakingWatchdog = setTimeout(() => {
+        if (!speaking || ttsPlaying) return;
+        console.warn("[watchdog] la voz se quedó colgada, reabro el micro");
+        stopLocalSpeech();
+        endSpeaking();
+    }, SPEAKING_TIMEOUT_MS);
+}
 
 function armBusyWatchdog() {
     clearTimeout(busyWatchdog);
