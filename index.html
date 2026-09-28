@@ -15,6 +15,13 @@
     <div id="videoContainer">
       <video id="videoFeed" autoplay playsinline></video>
       <div id="loadingOverlay">Loading...</div>
+
+      <!-- The answer reads as subtitles over the camera: big enough for a
+           passer-by, and it leaves the side panel for controls. -->
+      <div id="subtitles">
+        <span id="autoBadge" class="badge hidden">demo automática</span>
+        <p id="responseText"></p>
+      </div>
     </div>
 
     <canvas id="canvas" class="hidden"></canvas>
@@ -32,17 +39,14 @@
         <label for="instructionText">Instrucción:</label>
         <textarea id="instructionText" name="Instruction"></textarea>
       </div>
-      <div class="response-block">
-        <label for="responseText">
-          Respuesta:
-          <span id="autoBadge" class="badge hidden">demo automática</span>
-        </label>
-        <img id="lastFrame" class="hidden" alt="Fotograma analizado" />
-        <textarea id="responseText" name="Response" readonly></textarea>
-      </div>
       <div class="button-row">
         <button id="startButton" class="start">Analizar</button>
         <button id="speakToggle" title="Leer la respuesta en voz alta">🔊</button>
+      </div>
+      <div class="frame-block">
+        <label>Fotograma analizado:</label>
+        <img id="lastFrame" class="hidden" alt="Fotograma analizado" />
+        <div id="timing" class="timing"></div>
       </div>
     </aside>
   </div>

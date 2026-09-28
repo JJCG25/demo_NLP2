@@ -88,14 +88,21 @@ let attractorIndex = 0;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
-let modesBox, lastFrame, autoBadge;
+let modesBox, lastFrame, autoBadge, timingBox;
 
 function setResponse(text) {
     if (!responseText) return;
-    responseText.value = text;
-    // The box has a fixed region in the panel now, so instead of growing it we
-    // follow the text as it streams in.
-    responseText.scrollTop = responseText.scrollHeight;
+    responseText.textContent = text;
+    // Subtitles sit at the bottom of the frame, so a long answer scrolls to its
+    // newest line instead of growing upwards over the video.
+    const box = responseText.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+}
+
+// Latency numbers are for whoever runs the stand, not for the subtitles the
+// audience reads.
+function setTiming(text) {
+    if (timingBox) timingBox.textContent = text;
 }
 
 function setLoadingVisible(visible) {
@@ -241,6 +248,7 @@ async function handleAnalyze() {
 
     setBusy(true);
     setResponse("");
+    setTiming("analizando...");
     resetSpeech();
 
     const instruction = instructionText.value || currentMode.question;
@@ -333,7 +341,8 @@ async function handleAnalyze() {
             `[timing] ${elapsed.toFixed(1)}s total, first token ${ttft?.toFixed(1)}s, ` +
             `${tokens} tokens @ ${canvas.width}x${canvas.height}`
         );
-        setResponse(`${answer.trim()}\n\n(${elapsed.toFixed(1)}s · primera palabra ${ttft?.toFixed(1)}s)`);
+        setResponse(answer.trim());
+        setTiming(`${elapsed.toFixed(1)}s · primera palabra ${ttft?.toFixed(1)}s · ${tokens} tokens`);
 
     } catch (e) {
         setResponse(`Error: ${e.message}`);
@@ -417,6 +426,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     modesBox = document.getElementById("modes");
     lastFrame = document.getElementById("lastFrame");
     autoBadge = document.getElementById("autoBadge");
+    timingBox = document.getElementById("timing");
 
     startButton.addEventListener("click", handleAnalyze);
     speakToggle.addEventListener("click", () => setTtsEnabled(!ttsEnabled));
