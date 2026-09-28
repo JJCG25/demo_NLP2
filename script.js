@@ -28,6 +28,49 @@ const PRESETS = [
     ["🖼️", "Describe la escena."],
 ];
 
+// Same model, different system prompt. Cheap to add and it makes people try the
+// demo several times instead of once. Temperature varies on purpose: a factual
+// description wants 0, a poem wants room to invent.
+const MODES = [
+    {
+        id: "descriptivo", icon: "🔍", label: "Descriptivo",
+        question: "¿Qué ves?",
+        temperature: 0,
+        system: "Eres un asistente experto en análisis visual. " +
+                "Responde SIEMPRE en español, en dos frases como máximo, " +
+                "sin relleno conversacional y sin enumerar detalles irrelevantes."
+    },
+    {
+        id: "poeta", icon: "🎭", label: "Poeta",
+        question: "Escribe un poema sobre lo que ves.",
+        temperature: 0.9,
+        system: "Eres un poeta que mira el mundo a través de una cámara. " +
+                "Responde SIEMPRE en español con un poema de tres o cuatro versos " +
+                "sobre lo que ves. Sin preámbulos ni explicaciones."
+    },
+    {
+        id: "adivina", icon: "🎲", label: "Adivina",
+        question: "¿Qué objeto sostengo? Adivina.",
+        temperature: 0.7,
+        system: "Eres un asistente que juega a adivinar. Responde SIEMPRE en español, " +
+                "en una o dos frases: di qué objeto crees que sostiene la persona y por qué. " +
+                "Arriésgate aunque no estés seguro, y nunca pidas más información."
+    },
+    {
+        id: "traduce", icon: "🌐", label: "Traduce",
+        question: "Lee el texto de la imagen y tradúcelo al inglés.",
+        temperature: 0,
+        system: "Eres un traductor que lee texto en imágenes. Transcribe el texto visible " +
+                "y añade su traducción al inglés, con este formato exacto:\n" +
+                "Texto: ...\nInglés: ...\n" +
+                "Si no hay texto legible, responde solo: No veo texto."
+    },
+];
+
+// Attractor mode: an idle screen draws nobody, so after this long without a
+// touch the demo asks itself a question and keeps rotating. Set to 0 to disable.
+const IDLE_MS = 30000;
+
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
     if (!el) return;
@@ -39,9 +82,13 @@ function autoResizeTextarea(el) {
 let video, canvas, stream;
 let isThinking = false;
 let serverReady = false;
+let currentMode = MODES[0];
+let idleTimer = null;
+let attractorIndex = 0;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
+let modesBox, lastFrame, autoBadge;
 
 function setResponse(text) {
     if (!responseText) return;
@@ -171,6 +218,7 @@ function setBusy(busy) {
     isThinking = busy;
     startButton.disabled = busy;
     presetsBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
+    modesBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
 
     if (busy) {
         // Injects a self-animating SVG spinner along with the text
@@ -195,7 +243,7 @@ async function handleAnalyze() {
     setResponse("");
     resetSpeech();
 
-    const instruction = instructionText.value || "¿Qué ves?";
+    const instruction = instructionText.value || currentMode.question;
     const dataUrl = captureImage();
 
     if (!dataUrl) {
@@ -203,15 +251,16 @@ async function handleAnalyze() {
         return;
     }
 
+    // Show the exact frame that was sent. People assume the model watches live
+    // video, and seeing the still it actually looked at explains the whole thing
+    // without a word of explanation.
+    lastFrame.src = dataUrl;
+    lastFrame.classList.remove("hidden");
+
     // A 32B model follows the instruction on its own, so the few-shot example
     // and the "Descripción:" primer the 0.5B needed are gone.
     const messages = [
-        {
-            role: "system",
-            content: "Eres un asistente experto en análisis visual. " +
-                     "Responde SIEMPRE en español, en dos frases como máximo, " +
-                     "sin relleno conversacional y sin enumerar detalles irrelevantes."
-        },
+        { role: "system", content: currentMode.system },
         {
             role: "user",
             content: [
@@ -234,7 +283,7 @@ async function handleAnalyze() {
                 model: MODEL_ID,
                 messages,
                 max_tokens: MAX_TOKENS,
-                temperature: 0,
+                temperature: currentMode.temperature,
                 // Streaming is what makes a multi-second answer feel fast: the
                 // first words land in about a second and the rest reads as
                 // typing rather than waiting.
@@ -290,10 +339,59 @@ async function handleAnalyze() {
         setResponse(`Error: ${e.message}`);
     } finally {
         setBusy(false);
+        scheduleIdle();
     }
 }
 
-// --- UI y Draggable ---
+// --- MODO ATRACTOR ---
+function scheduleIdle() {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (!IDLE_MS) return;
+    idleTimer = setTimeout(runAttractor, IDLE_MS);
+}
+
+function runAttractor() {
+    if (!serverReady || isThinking) {
+        scheduleIdle();
+        return;
+    }
+    // Rotates through the presets so the screen never repeats itself twice in a
+    // row, which is what makes a passer-by stop and read.
+    const [, question] = PRESETS[attractorIndex % PRESETS.length];
+    attractorIndex++;
+
+    instructionText.value = question;
+    autoResizeTextarea(instructionText);
+    autoBadge.classList.remove("hidden");
+    handleAnalyze();
+}
+
+function noteInteraction() {
+    autoBadge.classList.add("hidden");
+    scheduleIdle();
+}
+
+// --- UI ---
+function renderModes() {
+    for (const mode of MODES) {
+        const chip = document.createElement("button");
+        chip.className = "chip mode";
+        chip.textContent = `${mode.icon} ${mode.label}`;
+        chip.classList.toggle("active", mode === currentMode);
+        chip.addEventListener("click", () => {
+            currentMode = mode;
+            modesBox.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+            chip.classList.add("active");
+            // The mode brings its own question, so one tap both switches the
+            // personality and shows it off.
+            instructionText.value = mode.question;
+            autoResizeTextarea(instructionText);
+            handleAnalyze();
+        });
+        modesBox.appendChild(chip);
+    }
+}
+
 function renderPresets() {
     for (const [icon, question] of PRESETS) {
         const chip = document.createElement("button");
@@ -316,9 +414,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     canvas = document.getElementById("canvas");
     presetsBox = document.getElementById("presets");
     speakToggle = document.getElementById("speakToggle");
+    modesBox = document.getElementById("modes");
+    lastFrame = document.getElementById("lastFrame");
+    autoBadge = document.getElementById("autoBadge");
 
     startButton.addEventListener("click", handleAnalyze);
     speakToggle.addEventListener("click", () => setTtsEnabled(!ttsEnabled));
+
+    // Any sign of a human postpones the attractor.
+    document.addEventListener("pointerdown", noteInteraction);
+    document.addEventListener("keydown", noteInteraction);
 
     // Enter sends the instruction; Shift+Enter still inserts a newline, since
     // this is a textarea. handleAnalyze already ignores presses while a request
@@ -330,6 +435,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         }
     });
 
+    renderModes();
     renderPresets();
 
     if ("speechSynthesis" in window) {
@@ -347,4 +453,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     await initCamera();
     await initModel();
+
+    // Only start the attractor once there is a server to ask.
+    if (serverReady) scheduleIdle();
 });

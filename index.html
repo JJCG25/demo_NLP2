@@ -21,6 +21,10 @@
 
     <aside class="io-areas">
       <div>
+        <label>Modo:</label>
+        <div id="modes" class="presets"></div>
+      </div>
+      <div>
         <label>Preguntas rápidas:</label>
         <div id="presets" class="presets"></div>
       </div>
@@ -29,7 +33,11 @@
         <textarea id="instructionText" name="Instruction"></textarea>
       </div>
       <div class="response-block">
-        <label for="responseText">Respuesta:</label>
+        <label for="responseText">
+          Respuesta:
+          <span id="autoBadge" class="badge hidden">demo automática</span>
+        </label>
+        <img id="lastFrame" class="hidden" alt="Fotograma analizado" />
         <textarea id="responseText" name="Response" readonly></textarea>
       </div>
       <div class="button-row">

@@ -314,3 +314,35 @@ button:disabled {
     border-top: 1px solid rgba(255, 255, 255, 0.12);
   }
 }
+
+/* --- Modos (personalidad del prompt) --- */
+.chip.mode.active {
+  background: var(--accent-gradient);
+  border-color: #608f89;
+}
+
+/* --- Fotograma analizado --- */
+/* The still that was actually sent, so nobody thinks the model is watching
+   live video. */
+#lastFrame {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+
+/* --- Aviso de demo automática --- */
+.badge {
+  float: right;
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent-gradient);
+  color: #fff;
+}
