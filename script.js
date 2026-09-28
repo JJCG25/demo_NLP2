@@ -11,7 +11,10 @@ const MODEL_ID = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ";
 // it leaves the browser cuts prefill time more than anything else here.
 const MAX_SIDE = 768;
 const JPEG_QUALITY = 0.8;
-const MAX_TOKENS = 64;
+// Room to finish a sentence. Decoding is token-by-token, so this is a direct
+// latency budget: at ~10 tok/s every 10 extra tokens costs about a second. The
+// prompt asks for two sentences, so this is headroom, not a target.
+const MAX_TOKENS = 128;
 
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
@@ -135,7 +138,8 @@ async function handleAnalyze() {
         {
             role: "system",
             content: "Eres un asistente experto en análisis visual. " +
-                     "Responde SIEMPRE en español, de forma concisa y directa, sin relleno conversacional."
+                     "Responde SIEMPRE en español, en dos frases como máximo, " +
+                     "sin relleno conversacional y sin enumerar detalles irrelevantes."
         },
         {
             role: "user",
