@@ -73,16 +73,24 @@ Then open `http://localhost:8080`. Port 8080, not 8000 — the tunnel owns 8000.
 
 ## 📏 Measuring latency
 
-Measure on the compute node against `localhost`, so neither the network nor the
-browser is in the numbers. With the server already running, open a second shell
-into the same allocation:
+Measure on the node against `localhost`, so neither the network nor the browser
+is in the numbers. The benchmark only makes HTTP calls, so it needs no GPU and
+no Slurm allocation — just a second shell on the same machine while the server
+runs:
 
 ```bash
-srun --jobid <jobid> --overlap --pty bash    # or a second shell inside salloc
 source /disk/$USER/venv/bin/activate
-python cluster/bench.py --port <port>                    # single size
+python cluster/bench.py --port <port>                        # single size
 python cluster/bench.py --port <port> --sweep 512,768,1024   # find the knee
 ```
+
+Under `HF_HUB_OFFLINE` a server started by hand registers the model under its
+local snapshot path, so pass the name the server reports:
+```bash
+--model "$(curl -s localhost:<port>/v1/models | python -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])')"
+```
+The sbatch pins the name with `--served-model-name`, so this is only needed for
+a hand-started server.
 
 It reports two numbers per frame size, and they have different causes:
 
