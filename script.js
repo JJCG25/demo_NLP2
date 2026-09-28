@@ -209,6 +209,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     startButton.addEventListener("click", handleAnalyze);
 
+    // Enter sends the instruction; Shift+Enter still inserts a newline, since
+    // this is a textarea. handleAnalyze already ignores presses while a request
+    // is in flight.
+    instructionText.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleAnalyze();
+        }
+    });
+
     const ioAreas = document.querySelector('.io-areas');
     if (ioAreas) makeDraggable(ioAreas);
 
