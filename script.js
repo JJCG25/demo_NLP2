@@ -140,8 +140,19 @@ let spokenUpTo = 0;
 let spanishVoice = null;
 
 function pickVoice() {
-    const voices = speechSynthesis.getVoices();
-    spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith("es")) || null;
+    const spanish = speechSynthesis.getVoices()
+        .filter(v => v.lang.toLowerCase().startsWith("es"));
+
+    // localService tells them apart: the system voices (Microsoft, Apple)
+    // synthesise on this machine, while Chrome's "Google ..." voices render on
+    // Google's servers, which would send every answer off the machine. Prefer
+    // local, and say so in the console when only a remote one is available.
+    spanishVoice = spanish.find(v => v.localService) || spanish[0] || null;
+
+    if (spanishVoice) {
+        console.log(`[tts] ${spanishVoice.name} — ` +
+                    (spanishVoice.localService ? "local" : "REMOTA: el texto sale a internet"));
+    }
 }
 
 function resetSpeech() {

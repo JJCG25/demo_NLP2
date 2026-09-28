@@ -135,9 +135,13 @@ salloc --partition=main --gres=gpu:4 --cpus-per-task=16 --mem=64G --time=1:00:00
 ## 📝 Technical Notes
 - **Model**: [`Qwen/Qwen2.5-VL-32B-Instruct-AWQ`](https://huggingface.co/Qwen/Qwen2.5-VL-32B-Instruct-AWQ) (int4, ~20 GB)
 - **Engine**: vLLM, OpenAI-compatible `/v1/chat/completions`, inside a Slurm job
-- **Speech**: Whisper `small` (int8) on the CPUs via faster-whisper, in the same
-  job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
+- **Speech in**: Whisper `small` (int8) on the CPUs via faster-whisper, in the
+  same job. Audio never leaves the machine; set `STT_BACKEND = "browser"` in
   `script.js` to use Chrome's recogniser instead, which streams it to Google
+- **Speech out**: the browser's `speechSynthesis`, preferring a voice with
+  `localService` so the answer text is synthesised on the laptop. Chrome's
+  "Google ..." voices render on Google's servers; the console logs which one was
+  picked, so check it before a public demo
 - **Storage**: venv, HF cache and compile caches all under `/disk/$USER`, never `$HOME`
 - **Precision**: `float16`, required — T4 (sm75) has no bfloat16 support
 - **Why not Qwen3-VL**: it has [no vLLM backend for Turing GPUs](https://github.com/vllm-project/vllm/issues/29743)
