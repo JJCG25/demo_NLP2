@@ -302,6 +302,7 @@ let speaking = false;       // the demo is talking, so the mic must stay shut
 // Local backend state
 let audioStream = null, analyser = null, vadTimer = null;
 let recorder = null, chunks = [], recording = false, forcedRecording = false;
+let dropUtterance = false;  // stop the recorder without sending what it captured
 let silenceSince = 0, recordingSince = 0;
 
 // In hands-free mode everything is ignored until a wake word shows up, so the
@@ -326,6 +327,11 @@ function paintMicState() {
 
 // Whatever the backend heard ends up here.
 function onTranscript(transcript) {
+    if (isThinking) {
+        // Same collision as above, reached from the browser backend.
+        maybeResumeListening();
+        return;
+    }
     const question = handsFree ? extractAfterWakeWord(transcript) : transcript.trim();
     if (!question) {
         // Heard something, but not for us. Keep waiting.
@@ -377,7 +383,8 @@ function startRecording() {
     recordingSince = Date.now();
 }
 
-function stopRecording() {
+function stopRecording(discard) {
+    dropUtterance = Boolean(discard);
     if (recorder && recording) recorder.stop();
     recording = false;
     forcedRecording = false;
@@ -386,6 +393,17 @@ function stopRecording() {
 async function sendUtterance() {
     const blob = new Blob(chunks, { type: "audio/webm" });
     chunks = [];
+
+    // Audio captured while an answer was already being produced is not a new
+    // question: transcribing it used to overwrite the streaming answer with
+    // "Transcribiendo..." and then be dropped by handleAnalyze, which looked
+    // exactly like a freeze.
+    const drop = dropUtterance;
+    dropUtterance = false;
+    if (drop || isThinking || speaking) {
+        maybeResumeListening();
+        return;
+    }
 
     // A fragment this short is a cough or a door, not a question.
     if (blob.size < 4000) {
@@ -420,7 +438,7 @@ function vadTick() {
     // Never record while the demo talks or thinks, or it transcribes its own
     // answer and asks itself about it.
     if (speaking || isThinking) {
-        if (recording) stopRecording();
+        if (recording) stopRecording(true);
         return;
     }
 
@@ -463,8 +481,7 @@ function stopLocalListening() {
     vadTimer = null;
     if (recording) {
         // Drop what was being recorded: the user asked it to stop.
-        chunks = [];
-        stopRecording();
+        stopRecording(true);
     }
     listening = false;
     paintMicState();
