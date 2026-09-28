@@ -102,7 +102,10 @@ const TTS_URL = "http://localhost:8100/speak";
 
 // Voice activity detection for the local backend. SPEECH_RMS is loudness on a
 // 0..1 scale: raise it in a noisy room, lower it if quiet speech is missed.
-const SPEECH_RMS = 0.02;
+const SPEECH_RMS = 0.03;
+// Loud frames (50ms each) a recording needs before it counts as speech worth
+// sending. Six is about a third of a second: shorter than any real question.
+const MIN_LOUD_FRAMES = 6;
 const SILENCE_MS = 900;          // pause that ends an utterance
 const MAX_UTTERANCE_MS = 15000;  // hard stop, so one noise cannot record forever
 
@@ -313,6 +316,7 @@ let speaking = false;       // the demo is talking, so the mic must stay shut
 let audioStream = null, analyser = null, vadTimer = null;
 let recorder = null, chunks = [], recording = false, forcedRecording = false;
 let dropUtterance = false;  // stop the recorder without sending what it captured
+let loudFrames = 0;         // how much of this recording was actually loud
 let silenceSince = 0, recordingSince = 0;
 
 // In hands-free mode everything is ignored until a wake word shows up, so the
@@ -383,6 +387,7 @@ function micLevel() {
 
 function startRecording() {
     chunks = [];
+    loudFrames = 0;
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus" : "audio/webm";
     recorder = new MediaRecorder(audioStream, { mimeType: mime });
@@ -436,6 +441,10 @@ async function sendUtterance() {
         if (body.text) {
             onTranscript(body.text);
         } else {
+            // Whisper heard no speech. In hands-free mode that is just room
+            // noise, so clear the status text instead of leaving it up; when
+            // someone pressed the button, tell them.
+            setResponse(handsFree ? "" : "No te he oído. Pulsa el micrófono y habla de nuevo.");
             maybeResumeListening();
         }
     } catch (e) {
@@ -464,15 +473,20 @@ function vadTick() {
 
     if (loud) {
         silenceSince = 0;
+        loudFrames++;
     } else if (!silenceSince) {
         silenceSince = Date.now();
     } else if (Date.now() - silenceSince > SILENCE_MS) {
-        // A pause this long means they finished the sentence.
+        // A pause this long means they finished the sentence -- unless there was
+        // barely any speech in it, in which case a door or a cough set the
+        // recorder off and Whisper would just return an empty string.
+        const wasSpeech = loudFrames >= MIN_LOUD_FRAMES;
         listening = false;
         clearInterval(vadTimer);
         vadTimer = null;
         paintMicState();
-        stopRecording();
+        stopRecording(!wasSpeech);
+        if (!wasSpeech) maybeResumeListening();
         return;
     }
 
