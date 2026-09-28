@@ -94,8 +94,13 @@ voices = [
 ]
 for name in voices:
     for f in (name, name + ".json"):
-        src = hf_hub_download("rhasspy/piper-voices", f)
-        shutil.copy(src, dest / pathlib.Path(f).name)
+        dst = dest / pathlib.Path(f).name
+        if dst.exists():
+            continue
+        # copyfile, not copy: the HF cache keeps files read-only and copy would
+        # carry that mode over, so a second run could not overwrite them.
+        shutil.copyfile(hf_hub_download("rhasspy/piper-voices", f), dst)
+        dst.chmod(0o644)
     print(" ", pathlib.Path(name).name)
 VOICE
 
