@@ -71,6 +71,10 @@ const MODES = [
 // touch the demo asks itself a question and keeps rotating. Set to 0 to disable.
 const IDLE_MS = 30000;
 
+// Speech recognition locale. "es-CO", "es-MX" or "es-AR" recognise local accents
+// noticeably better than the Castilian default.
+const SPEECH_LANG = "es-ES";
+
 // --- Auto-resize textareas ---
 function autoResizeTextarea(el) {
     if (!el) return;
@@ -88,7 +92,7 @@ let attractorIndex = 0;
 
 // DOM references
 let instructionText, responseText, startButton, loadingOverlay, presetsBox, speakToggle;
-let modesBox, lastFrame, autoBadge, timingBox;
+let modesBox, lastFrame, autoBadge, timingBox, micButton;
 
 function setResponse(text) {
     if (!responseText) return;
@@ -164,6 +168,84 @@ function setTtsEnabled(on) {
     }
 }
 
+// --- ESCUCHA (voz a voz) ---
+// Push to talk rather than always-on listening: a stand is noisy, and a mic that
+// is always open picks up the crowd and the demo's own answers.
+let recognition = null;
+let listening = false;
+
+function initSpeechRecognition() {
+    const Impl = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Impl) {
+        micButton.style.display = "none";
+        return;
+    }
+
+    recognition = new Impl();
+    recognition.lang = SPEECH_LANG;
+    recognition.continuous = false;   // stops on its own once the person pauses
+    recognition.interimResults = true;
+
+    recognition.addEventListener("result", (e) => {
+        let transcript = "";
+        let isFinal = false;
+        for (const result of e.results) {
+            transcript += result[0].transcript;
+            if (result.isFinal) isFinal = true;
+        }
+
+        // Show the words as they are recognised, so people can see it heard them.
+        instructionText.value = transcript;
+        autoResizeTextarea(instructionText);
+
+        if (isFinal && transcript.trim()) {
+            setListening(false);
+            handleAnalyze();
+        }
+    });
+
+    recognition.addEventListener("end", () => setListening(false));
+
+    recognition.addEventListener("error", (e) => {
+        setListening(false);
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+            setResponse("Permite el acceso al micrófono para hablarle.");
+        } else if (e.error === "no-speech") {
+            setResponse("No te he oído. Pulsa el micrófono y habla de nuevo.");
+        }
+    });
+}
+
+function setListening(on) {
+    listening = on;
+    micButton.classList.toggle("listening", on);
+    micButton.textContent = on ? "⏹" : "🎤";
+}
+
+function toggleListening() {
+    if (!recognition || isThinking) return;
+
+    if (listening) {
+        recognition.stop();
+        return;
+    }
+
+    // Never listen while the demo is talking, or the mic transcribes its own
+    // answer straight back.
+    resetSpeech();
+    // Someone talking to it expects to be answered out loud.
+    if (!ttsEnabled) setTtsEnabled(true);
+
+    setResponse("Escuchando...");
+    setListening(true);
+    try {
+        recognition.start();
+    } catch (e) {
+        // Already running; harmless.
+        setListening(true);
+    }
+}
+
 async function initCamera() {
     video = document.getElementById("videoFeed");
     try {
@@ -224,6 +306,7 @@ function captureImage() {
 function setBusy(busy) {
     isThinking = busy;
     startButton.disabled = busy;
+    micButton.disabled = busy;
     presetsBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
     modesBox.querySelectorAll("button").forEach(b => { b.disabled = busy; });
 
@@ -427,9 +510,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     lastFrame = document.getElementById("lastFrame");
     autoBadge = document.getElementById("autoBadge");
     timingBox = document.getElementById("timing");
+    micButton = document.getElementById("micButton");
 
     startButton.addEventListener("click", handleAnalyze);
     speakToggle.addEventListener("click", () => setTtsEnabled(!ttsEnabled));
+    micButton.addEventListener("click", toggleListening);
 
     // Any sign of a human postpones the attractor.
     document.addEventListener("pointerdown", noteInteraction);
@@ -447,6 +532,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     renderModes();
     renderPresets();
+    initSpeechRecognition();
 
     if ("speechSynthesis" in window) {
         pickVoice();
