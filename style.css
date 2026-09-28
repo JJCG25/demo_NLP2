@@ -5,8 +5,12 @@
 }
 
 :root {
-  --overlay-bg: rgba(255, 255, 255, 0.15);
-  --glass-blur: blur(12px);
+  /* Dark and fairly opaque on purpose: a white translucent panel washes out
+     against a bright camera feed, which is exactly where the text became hard
+     to read. Dark glass keeps white text legible in any lighting. */
+  --overlay-bg: rgba(16, 20, 26, 0.78);
+  --overlay-bg-hover: rgba(16, 20, 26, 0.88);
+  --glass-blur: blur(16px);
   --accent-gradient: linear-gradient(135deg, #42625e, #608f89);
   --stop-gradient: linear-gradient(135deg, #94353e, #d54c5a);
   --shadow-lg: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
@@ -98,7 +102,7 @@ body {
   transform: translateX(-50%);
   /* Initial center position */
   width: 90%;
-  max-width: 520px;
+  max-width: 560px;
   z-index: 100;
   background: var(--overlay-bg);
   backdrop-filter: var(--glass-blur);
@@ -130,13 +134,13 @@ body {
 }
 
 .io-areas:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--overlay-bg-hover);
 }
 
 label {
   display: block;
   font-weight: 700;
-  font-size: 0.85em;
+  font-size: 0.95em;
   color: #fff;
   text-transform: uppercase;
   letter-spacing: 1.5px;
@@ -148,10 +152,11 @@ textarea {
   width: 100%;
   min-height: 50px;
   padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 12px;
-  font-size: 15px;
-  background: rgba(0, 0, 0, 0.2);
+  font-size: 17px;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.35);
   color: #fff;
   transition: all 0.2s ease;
   resize: none;
@@ -165,16 +170,16 @@ textarea:focus {
 }
 
 #responseText {
-  font-size: 16px;
-  line-height: 1.5;
-  color: #e0e0e0;
+  font-size: 19px;
+  line-height: 1.6;
+  color: #fff;
 }
 
 /* --- Buttons --- */
 #startButton {
   width: 100%;
   padding: 16px;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 2px;
   cursor: pointer;
